@@ -53,7 +53,7 @@ jobs:
       # First pass cuts the release only; the release PR is built in a
       # second pass below, once the tag exists.
       - name: Get release version
-        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v5.0.0
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release-please
         with:
           skip-github-pull-request: true
@@ -75,7 +75,7 @@ jobs:
       # cuts a release treats every released commit as unreleased and opens
       # a duplicate vNext PR.
       - name: Create release pull request
-        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v5.0.0
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           skip-github-release: true
 
