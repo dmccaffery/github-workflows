@@ -56,8 +56,7 @@ jobs:
     # authoritatively, so this only filters noise. NB: this couples the workflow
     # to the issue_comment trigger — callers must trigger on issue_comment.
     if: >-
-      github.event.issue.pull_request &&
-      github.event.comment.body == '/merge' &&
+      github.event.issue.pull_request && github.event.comment.body == '/merge' &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
@@ -65,7 +64,7 @@ jobs:
         id: app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-client-id: ${{ inputs.app-client-id }}
+          client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
 
       - name: Fast-forward merge
