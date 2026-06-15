@@ -1,0 +1,260 @@
+# Reusable "auto-merge" — the set-and-forget companion to merge.yaml. Instead of a
+# maintainer timing a `/merge` comment to land after CI finishes, they *arm* a PR
+# once (comment `/auto-merge`, or add the `auto-merge` label) and this workflow
+# fast-forwards it on its own the moment the PR is both approved and fully green.
+# It uses the same `ff-merge` action as merge.yaml, so the commit objects are
+# untouched and every original signature is preserved.
+#
+# There is no single GitHub event for "all of a repo's own Actions checks are
+# done" — GitHub does not fire check_suite/check_run for runs started by
+# GITHUB_TOKEN (see dependabot-merge.yaml). So, exactly like the Dependabot flow,
+# completion is observed via workflow_run(completed) listing every required
+# workflow: whichever finishes last triggers a merge attempt, and `ff-merge`
+# re-verifies that ALL checks are green (and the PR approved, and a genuine
+# fast-forward) before moving the ref — declining otherwise. The arming label/
+# comment is only a cheap, persistent marker; `ff-merge` remains the sole
+# authority on whether a merge may happen, so a mis-armed PR can never merge early.
+#
+# The label is the load-bearing state. A `/auto-merge` comment is ephemeral, so it
+# simply applies the label; everything downstream keys off the label. Remove the
+# label to cancel.
+#
+# Four events, handled by three mutually-exclusive jobs (github.event is the
+# caller's triggering event inside a reusable workflow, so each job gates on its
+# own event — at most one runs per invocation):
+#
+#   - issue_comment(created) `/auto-merge`, or pull_request_target(labeled) -> arm
+#       (Re)apply the label and make one best-effort fast-forward attempt now, in
+#       case the PR is already approved and green (there would be no later
+#       workflow_run/review to fire otherwise). issue_comment / pull_request_target
+#       run in the base-repo context, so the App credentials are available even for
+#       fork PRs. This is the SAFE use of pull_request_target: the workflow never
+#       checks out or runs PR code and interpolates no PR-controlled content.
+#
+#   - workflow_run(completed) -> merge-on-checks
+#       A required CI workflow finished green; resolve the open PR for its branch,
+#       and if it carries the label, fast-forward it.
+#
+#   - pull_request_review(submitted, approved) -> merge-on-review
+#       Covers arming a PR *before* it is approved: an approval fires no
+#       workflow_run, so this retries the merge when the review lands. Runs in the
+#       base context with secrets, like pull_request_target.
+#
+# Authorization model: the `/auto-merge` comment is gated to org members
+# (author_association); adding a label already requires triage+ on GitHub. Neither
+# is treated as sufficient to merge — `ff-merge` runs with require-approval:true,
+# so a qualifying approval plus green checks is always required. maintainer-only is
+# false for the same reason it is in dependabot-merge.yaml's merge job: the actor
+# on a workflow_run/review is not the arming maintainer, and the approval is the
+# real gate.
+#
+# Requires branch protection that requires PR review (so an approval sets the
+# review decision) — the same assumption as the /merge and Dependabot flows. See
+# README.md for the one-time org setup (App, ruleset bypass, org var/secret); it is
+# the same "FF Merge" App as merge.yaml.
+name: Auto-merge
+
+on:
+  workflow_call:
+    inputs:
+      app-client-id:
+        description: The client id of the github app used to perform the merge (vars.FF_MERGE_CLIENT_ID)
+        required: true
+        type: string
+      label:
+        description: The label that arms auto-merge on a pull request.
+        required: false
+        default: auto-merge
+        type: string
+      command:
+        description: The issue-comment body that arms auto-merge.
+        required: false
+        default: /auto-merge
+        type: string
+    secrets:
+      app-private-key:
+        description: The private key for the github app used to perform the merge (secrets.FF_MERGE_PRIVATE_KEY)
+        required: true
+
+# the App token does the privileged work; arm grants itself the little it needs
+permissions: {}
+
+# serialize ref moves within a repo so an auto-merge can't race a /merge or a
+# Dependabot merge — same group as merge.yaml / dependabot-merge.yaml
+concurrency:
+  group: ff-merge-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  arm:
+    # A maintainer comments /auto-merge, or someone adds the auto-merge label. The
+    # comment path is gated to org members; the label path relies on GitHub's own
+    # triage+ requirement for labelling plus the approval gate below.
+    if: >-
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+      github.event.comment.body == inputs.command &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_target' && github.event.action == 'labeled' &&
+      github.event.label.name == inputs.label)
+    runs-on: ubuntu-latest
+    permissions:
+      # GITHUB_TOKEN applies the label and posts the confirmation; the App token
+      # (minted below) does the privileged ref move.
+      pull-requests: write
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - name: Resolve the pull request number
+        id: pr
+        env:
+          # issue_comment carries issue.number; labeled carries pull_request.number.
+          # The unused one renders empty, so the first non-empty wins.
+          FROM_COMMENT: ${{ github.event.issue.number }}
+          FROM_LABEL: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          number="${FROM_COMMENT:-}"
+          [ -n "$number" ] || number="${FROM_LABEL:-}"
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure the auto-merge label is present
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.number }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          # Idempotent: a no-op when armed via the label, applies it when armed via
+          # the comment. --add-label creates the label if the repo lacks it.
+          gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL"
+
+      - name: Confirm arming
+        # Only on the comment path — re-labelling shouldn't spam the thread.
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.number }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            '> [!NOTE]' \
+            '> **Auto-merge armed.** Once this PR is approved and every required check' \
+            '> passes, it will be fast-forwarded into the base branch automatically,' \
+            '> preserving every commit signature.' \
+            '>' \
+            "> Remove the \`${LABEL}\` label to cancel. If the branch is not" \
+            '> fast-forwardable, rebase onto the base branch and re-sign — CI re-runs' \
+            '> and the merge retries.' \
+            | gh pr comment "$PR" --repo "$REPO" --body-file -
+
+      - name: Attempt fast-forward now (best effort)
+        # ff-merge declines if the PR isn't yet approved or any required check is
+        # pending or failing — expected while CI runs, so a decline here must not
+        # fail the run. The merge-on-checks / merge-on-review jobs retry when the
+        # state changes; an already-approved, already-green PR merges right here.
+        continue-on-error: true
+        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        with:
+          token: ${{ steps.app.outputs.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          actor: ${{ github.actor }}
+          require-approval: true
+          maintainer-only: false
+
+  merge-on-checks:
+    # A required CI workflow finished green. workflow_run carries the branch, not
+    # the PR; the next step resolves the labeled PR for it.
+    if: >-
+      github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - name: Resolve the armed PR for this branch
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          # Find the open PR for the branch that carries the auto-merge label. The
+          # last required workflow to finish does the real merge; ff-merge declines
+          # if any other required check is still pending or failing.
+          number=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+            --json number,labels \
+            --jq "map(select(any(.labels[]; .name == \"${LABEL}\"))) | .[0].number // empty")
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          if [ -z "$number" ]; then
+            echo "No armed PR for ${BRANCH}; nothing to merge."
+          fi
+
+      - name: Fast-forward merge
+        if: steps.pr.outputs.number != ''
+        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        with:
+          token: ${{ steps.app.outputs.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          actor: ${{ github.actor }}
+          require-approval: true
+          maintainer-only: false
+
+  merge-on-review:
+    # An approval landed. If the PR was armed before review, no workflow_run fires
+    # on the approval — this retries the merge so a "arm, then approve" order works.
+    if: >-
+      github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - name: Check the PR is armed
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          armed=$(gh pr view "$PR" --repo "$REPO" --json labels \
+            --jq "any(.labels[]; .name == \"${LABEL}\")")
+          if [ "$armed" = "true" ]; then
+            echo "number=${PR}" >> "$GITHUB_OUTPUT"
+          else
+            echo "PR #${PR} is not armed for auto-merge; nothing to do."
+            echo "number=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fast-forward merge
+        if: steps.pr.outputs.number != ''
+        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        with:
+          token: ${{ steps.app.outputs.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          actor: ${{ github.actor }}
+          require-approval: true
+          maintainer-only: false
