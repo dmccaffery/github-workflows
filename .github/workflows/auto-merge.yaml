@@ -97,10 +97,10 @@ jobs:
       (github.event_name == 'pull_request_target' && github.event.action == 'labeled' &&
       github.event.label.name == inputs.label)
     runs-on: ubuntu-latest
-    permissions:
-      # GITHUB_TOKEN applies the label and posts the confirmation; the App token
-      # (minted below) does the privileged ref move.
-      pull-requests: write
+    # No GITHUB_TOKEN permissions: the App token (minted below, pull-requests:write)
+    # applies the label, posts the confirmation, and does the ref move — so callers
+    # keep permissions: {}. A job-level grant here would have to stay within the
+    # caller's grant, and exceeding it is a workflow startup error.
     steps:
       - name: Mint a github app installation token
         id: app
@@ -124,7 +124,7 @@ jobs:
 
       - name: Ensure the auto-merge label is present
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
           PR: ${{ steps.pr.outputs.number }}
           LABEL: ${{ inputs.label }}
@@ -138,7 +138,7 @@ jobs:
         # Only on the comment path — re-labelling shouldn't spam the thread.
         if: github.event_name == 'issue_comment'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
           PR: ${{ steps.pr.outputs.number }}
           LABEL: ${{ inputs.label }}
