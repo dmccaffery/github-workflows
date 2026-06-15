@@ -13,16 +13,17 @@ Copy a caller from [`examples/`](examples/) into your repo's `.github/workflows/
 All reusable workflows live in [`.github/workflows/`](.github/workflows/) and are `workflow_call`-only. Every external
 action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 
-| Workflow                                       | Platform | What it does                                                                                                     |
-| ---------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
-| [`ci-actions.yaml`](#ci-actionsyaml)           | node     | lint/typecheck/test+coverage/build, dist-reproducibility gate, Codecov upload                                    |
-| [`ci-go.yaml`](#ci-goyaml)                     | go       | build/vet/test+coverage/vuln + prose lint, Codecov upload                                                        |
-| [`codeql-node.yaml`](#codeql-nodeyaml)         | node     | CodeQL over actions + javascript-typescript (build-free)                                                         |
-| [`codeql-go.yaml`](#codeql-goyaml)             | go       | CodeQL over actions + go (go via autobuild)                                                                      |
-| [`release-actions.yaml`](#release-actionsyaml) | node     | release-please → rebuild `dist/`, verify, move floating major tag                                                |
-| [`release-go.yaml`](#release-goyaml)           | go       | release-please (two-pass) → GoReleaser (archives, checksums, SBOMs, cosign, optional Homebrew, SLSA attestation) |
-| [`merge.yaml`](#mergeyaml)                     | any      | signature-preserving fast-forward `/merge` (mints an App token, runs the `ff-merge` action)                      |
-| [`merge-notice.yaml`](#merge-noticeyaml)       | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                              |
+| Workflow                                         | Platform | What it does                                                                                                     |
+| ------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| [`ci-actions.yaml`](#ci-actionsyaml)             | node     | lint/typecheck/test+coverage/build, dist-reproducibility gate, Codecov upload                                    |
+| [`ci-go.yaml`](#ci-goyaml)                       | go       | build/vet/test+coverage/vuln + prose lint, Codecov upload                                                        |
+| [`codeql-node.yaml`](#codeql-nodeyaml)           | node     | CodeQL over actions + javascript-typescript (build-free)                                                         |
+| [`codeql-go.yaml`](#codeql-goyaml)               | go       | CodeQL over actions + go (go via autobuild)                                                                      |
+| [`release-actions.yaml`](#release-actionsyaml)   | node     | release-please → rebuild `dist/`, verify, move floating major tag                                                |
+| [`release-go.yaml`](#release-goyaml)             | go       | release-please (two-pass) → GoReleaser (archives, checksums, SBOMs, cosign, optional Homebrew, SLSA attestation) |
+| [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward `/merge` (mints an App token, runs the `ff-merge` action)                      |
+| [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                              |
+| [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                 |
 
 Each workflow below lists its inputs, secrets, and the permission ceiling the **caller** must grant — a reusable
 workflow's jobs cannot exceed the permissions of the job that calls them. The snippet is the minimal caller; follow the
@@ -245,6 +246,45 @@ jobs:
 
 Full example: [`examples/merge-notice.yaml`](examples/merge-notice.yaml).
 
+### `dependabot-merge.yaml`
+
+_Any repo._ Auto-approves Dependabot **minor and patch** PRs, then fast-forwards them into the base branch once CI is
+green — using the same signature-preserving `ff-merge` action as [`merge.yaml`](#mergeyaml). Major updates are never
+approved, so they wait for a human. Both the approval and the merge are done with the "FF Merge" App token, so approval
+works regardless of the org "Allow GitHub Actions to approve pull requests" setting (that only restricts
+`GITHUB_TOKEN`). Requires a
+[`.github/dependabot.yaml`](https://docs.github.com/en/code-security/dependabot/dependabot-version-updates) so
+Dependabot opens PRs, and branch protection that requires PR review (so the approval sets the review decision) — the
+same assumption as the `/merge` flow.
+
+- **Inputs:** `app-client-id` (required; `vars.FF_MERGE_CLIENT_ID`), `update-types` (optional; JSON array of Dependabot
+  update types, default `["version-update:semver-patch", "version-update:semver-minor"]`).
+- **Secrets:** `app-private-key` — required (`secrets.FF_MERGE_PRIVATE_KEY`).
+- **Permissions (caller grants):** none — the App token does the privileged work, so the caller job sets
+  `permissions: {}`.
+- **Triggers (the caller owns both):** `pull_request_target` (`opened`/`reopened`/`synchronize`) to approve on open, and
+  `workflow_run` (`completed`) listing your CI workflow name(s) to fast-forward once they finish green. `check_suite` is
+  _not_ used — GitHub does not fire it for a repo's own Actions CI.
+
+```yaml
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  workflow_run:
+    workflows: ["CI"] # your CI workflow name(s) — all that must be green
+    types: [completed]
+permissions: {}
+jobs:
+  auto-merge:
+    uses: bitwise-media-group/github-workflows/.github/workflows/dependabot-merge.yaml@v1
+    with:
+      app-client-id: ${{ vars.FF_MERGE_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.FF_MERGE_PRIVATE_KEY }}
+```
+
+Full example: [`examples/dependabot-merge.yaml`](examples/dependabot-merge.yaml).
+
 ## Consumer contracts
 
 The language-specific workflows assume a small contract so they can stay free of per-repo configuration:
@@ -272,9 +312,10 @@ for short-lived testing.
 
 ## Fast-forward merge: org setup
 
-`merge.yaml` / `merge-notice.yaml` drive the `bitwise-media-group/ff-merge` action. The one-time org setup (the "FF
-Merge" GitHub App, its ruleset bypass, and the `FF_MERGE_CLIENT_ID` variable + `FF_MERGE_PRIVATE_KEY` secret) is
-documented in [`bitwise-media-group/ff-merge`](https://github.com/bitwise-media-group/ff-merge).
+`merge.yaml` / `merge-notice.yaml` / `dependabot-merge.yaml` drive the `bitwise-media-group/ff-merge` action. The
+one-time org setup (the "FF Merge" GitHub App, its ruleset bypass, and the `FF_MERGE_CLIENT_ID` variable +
+`FF_MERGE_PRIVATE_KEY` secret) is documented in
+[`bitwise-media-group/ff-merge`](https://github.com/bitwise-media-group/ff-merge).
 
 > **Note on App input names.** This library's contract is input `app-client-id` + secret `app-private-key`, backed by
 > `vars.FF_MERGE_CLIENT_ID` / `secrets.FF_MERGE_PRIVATE_KEY`. Existing callers across the org currently use inconsistent
@@ -285,9 +326,10 @@ documented in [`bitwise-media-group/ff-merge`](https://github.com/bitwise-media-
 
 This repo is YAML + Markdown only, so it can't run the built-Action `ci-actions` / `release-actions` reusables against
 itself. It dogfoods what it can — its own prose CI (`self-ci.yaml`: prettier + markdownlint), `codeql` (over its own
-workflows, via `self-codeql.yaml`), and the `/merge` flow (`self-merge.yaml` / `self-merge-notice.yaml`). Validate a
-change to a language-specific workflow by temporarily pointing a real consumer's caller at a feature branch or SHA
-(`@your-branch`) and opening a PR there.
+workflows, via `self-codeql.yaml`), the `/merge` flow (`self-merge.yaml` / `self-merge-notice.yaml`), and Dependabot
+auto-merge (`self-dependabot-merge.yaml`, which keeps the reusable workflows' action pins fresh). Validate a change to a
+language-specific workflow by temporarily pointing a real consumer's caller at a feature branch or SHA (`@your-branch`)
+and opening a PR there.
 
 ## Releasing this repo
 

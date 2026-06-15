@@ -1,0 +1,147 @@
+# Reusable Dependabot auto-merge. Dependabot opens a PR; if it is a minor or
+# patch update this approves it, then fast-forwards it into the base branch once
+# CI is green — preserving Dependabot's signed commits with the same `ff-merge`
+# action that backs the `/merge` flow (see merge.yaml). Major updates are never
+# approved, so they wait for a human.
+#
+# Two events, two jobs. The caller owns both triggers; each job gates on the one
+# it handles (github.event is the caller's event inside a reusable workflow):
+#
+#   - pull_request_target (opened/reopened/synchronize) -> `approve`
+#       Read the update's semver level with dependabot/fetch-metadata and, if it
+#       is in `update-types`, record an approval. pull_request_target — not
+#       pull_request — runs in the base-repo context so the App credentials are
+#       available even for the bot's PRs. This is the SAFE use of that trigger:
+#       the workflow never checks out or runs PR code and interpolates no
+#       PR-controlled content; it only mints an App token and calls the API.
+#
+#   - workflow_run (completed) -> `merge`
+#       When a watched CI workflow finishes, fast-forward the PR. The merge
+#       requires an approval (ff-merge `require-approval: true`) and only
+#       minor/patch PRs ever get one, so the semver policy is enforced entirely by
+#       `approve`; `merge` just fast-forwards approved, green Dependabot PRs.
+#       workflow_run — not check_suite — is used because GitHub does not fire
+#       check_suite/check_run for a repo's own GitHub Actions CI (events triggered
+#       by GITHUB_TOKEN do not start new runs). The ff-merge action re-verifies all
+#       checks authoritatively and declines if any are pending or failing, so the
+#       last watched workflow to finish is the one that actually merges.
+#
+# Approval and the merge both use a short-lived App token: a GitHub App can approve
+# regardless of the org "Allow GitHub Actions to approve pull requests" setting
+# (that only restricts GITHUB_TOKEN). The caller therefore grants no permissions.
+#
+# Requires branch protection that requires PR review (so an approval sets the
+# review decision to APPROVED) — the same assumption as the `/merge` flow. See
+# README.md for the one-time org setup (App, ruleset bypass, org var/secret); it
+# is the same "FF Merge" App as merge.yaml.
+name: Dependabot auto-merge
+
+on:
+  workflow_call:
+    inputs:
+      app-client-id:
+        description: The client id of the github app used to approve and merge (vars.FF_MERGE_CLIENT_ID)
+        required: true
+        type: string
+      update-types:
+        description: >-
+          JSON array of Dependabot update types to auto-approve and merge. Defaults to minor and patch. Add
+          "version-update:semver-major" to also auto-merge majors (not recommended).
+        required: false
+        default: '["version-update:semver-patch", "version-update:semver-minor"]'
+        type: string
+    secrets:
+      app-private-key:
+        description: The private key for the github app used to approve and merge (secrets.FF_MERGE_PRIVATE_KEY)
+        required: true
+
+# the App token does all privileged work; the job GITHUB_TOKENs need nothing
+permissions: {}
+
+jobs:
+  approve:
+    # Only a Dependabot PR being opened or updated. user.login is stable even when
+    # a human reopens the PR (github.actor would be the human then).
+    if: >-
+      github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+
+      - name: Approve in-policy update
+        # For grouped updates update-type is the highest semver bump in the group,
+        # so a group containing a major is not approved.
+        if: contains(fromJSON(inputs.update-types), steps.meta.outputs.update-type)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+        run: |
+          set -euo pipefail
+          # Re-approving is a no-op when an active approval already exists; on a
+          # synchronize that dismissed the prior review this restores it.
+          gh pr review "$PR" --repo "$REPO" --approve \
+            --body "Auto-approving ${UPDATE_TYPE} Dependabot update."
+
+  merge:
+    # Only when a watched CI workflow for a Dependabot branch finished green.
+    if: >-
+      github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch,
+      'dependabot/')
+    runs-on: ubuntu-latest
+    # Serialize ref moves within a repo so a /merge and a Dependabot merge cannot
+    # race (same group as merge.yaml).
+    concurrency:
+      group: ff-merge-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+
+      - name: Resolve the open Dependabot PR for this branch
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          # workflow_run carries the branch, not the PR. Find the open PR for it and
+          # confirm Dependabot authored it (defense in depth — the approval is the
+          # real authorization gate).
+          number=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+            --json number,author \
+            --jq 'map(select(.author.login == "dependabot[bot]")) | .[0].number // empty')
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          if [ -z "$number" ]; then
+            echo "No open Dependabot PR for ${BRANCH}; nothing to merge."
+          fi
+
+      - name: Fast-forward merge
+        if: steps.pr.outputs.number != ''
+        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        with:
+          token: ${{ steps.app.outputs.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          # The approval (minor/patch only) is the authorization gate; Dependabot
+          # is not a maintainer, so do not require write access of the actor.
+          require-approval: true
+          maintainer-only: false

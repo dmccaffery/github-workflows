@@ -1,0 +1,37 @@
+# This repo's own caller for the reusable Dependabot auto-merge workflow — the
+# library dogfoods it. Dependabot opens github-actions pin-bump PRs (see
+# .github/dependabot.yaml); minor/patch ones are auto-approved and fast-forwarded
+# once this repo's CI is green, keeping the reusable workflows' SHA pins fresh
+# with no human in the loop.
+#
+# Calls the reusable workflow by local path so it tracks this repo's current
+# definition rather than a pinned release (like self-merge.yaml).
+#
+# Both triggers are required: pull_request_target to approve on open, and
+# workflow_run to fast-forward once CI finishes green. The workflow_run list names
+# every workflow that must pass — "Continuous integration" (self-ci.yaml) and
+# "CodeQL analysis" (self-codeql.yaml); whichever finishes last triggers the merge
+# attempt, and ff-merge verifies all checks before moving the ref.
+#
+# Org prerequisites (see bitwise-media-group/ff-merge): the FF_MERGE_CLIENT_ID
+# variable + FF_MERGE_PRIVATE_KEY secret and the "FF Merge" App in main's ruleset
+# bypass list — the same App as the /merge flow.
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  workflow_run:
+    workflows: ["Continuous integration", "CodeQL analysis"]
+    types: [completed]
+
+# the App token does the privileged work; the caller grants nothing
+permissions: {}
+
+jobs:
+  auto-merge:
+    uses: ./.github/workflows/dependabot-merge.yaml
+    with:
+      app-client-id: ${{ vars.FF_MERGE_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.FF_MERGE_PRIVATE_KEY }}
