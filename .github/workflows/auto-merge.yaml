@@ -10,10 +10,10 @@
 # GITHUB_TOKEN (see dependabot-merge.yaml). So, exactly like the Dependabot flow,
 # completion is observed via workflow_run(completed) listing every required
 # workflow: whichever finishes last triggers a merge attempt, and `ff-merge`
-# re-verifies that ALL checks are green (and the PR approved, and a genuine
-# fast-forward) before moving the ref — declining otherwise. The arming label/
-# comment is only a cheap, persistent marker; `ff-merge` remains the sole
-# authority on whether a merge may happen, so a mis-armed PR can never merge early.
+# re-verifies that ALL checks are green (the PR approved, a genuine fast-forward,
+# and the arming label present via require-label) before moving the ref — skipping
+# or declining otherwise. The label is a persistent opt-in marker that `ff-merge`
+# itself enforces, so a mis-armed PR can never merge early.
 #
 # The label is the load-bearing state. A `/auto-merge` comment is ephemeral, so it
 # simply applies the label; everything downstream keys off the label. Remove the
@@ -35,13 +35,15 @@
 #       the workflow entirely.
 #
 #   - workflow_run(completed) -> merge-on-checks
-#       A required CI workflow finished green; resolve the open PR for its branch,
-#       and if it carries the label, fast-forward it.
+#       A required CI workflow finished green; resolve the open PR for its branch
+#       and hand it to ff-merge, which fast-forwards it only if it carries the
+#       arming label (require-label) — otherwise ff-merge skips it.
 #
 #   - pull_request_review(submitted, approved) -> merge-on-review
 #       Covers arming a PR *before* it is approved: an approval fires no
-#       workflow_run, so this retries the merge when the review lands. Runs in the
-#       base-repo context with secrets (so it covers fork PRs too).
+#       workflow_run, so this retries the merge when the review lands. ff-merge's
+#       require-label skips the PR if it is not armed. Runs in the base-repo context
+#       with secrets (so it covers fork PRs too).
 #
 # Authorization model: the `/auto-merge` comment is gated to org members
 # (author_association); adding a label already requires triage+ on GitHub. Neither
@@ -166,7 +168,7 @@ jobs:
         # fail the run. The merge-on-checks / merge-on-review jobs retry when the
         # state changes; an already-approved, already-green PR merges right here.
         continue-on-error: true
-        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
@@ -174,10 +176,12 @@ jobs:
           actor: ${{ github.actor }}
           require-approval: true
           maintainer-only: false
+          require-label: ${{ inputs.label }}
 
   merge-on-checks:
     # A required CI workflow finished green. workflow_run carries the branch, not
-    # the PR; the next step resolves the labeled PR for it.
+    # the PR; the next step resolves the open PR for it and ff-merge's require-label
+    # enforces the arming label.
     if: >-
       github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success'
@@ -190,29 +194,27 @@ jobs:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
 
-      - name: Resolve the armed PR for this branch
+      - name: Resolve the open PR for this branch
         id: pr
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
-          LABEL: ${{ inputs.label }}
         run: |
           set -euo pipefail
-          # Find the open PR for the branch that carries the auto-merge label. The
-          # last required workflow to finish does the real merge; ff-merge declines
-          # if any other required check is still pending or failing.
+          # workflow_run carries the branch, not the PR; find its open PR. The last
+          # required workflow to finish triggers the real merge; ff-merge skips a PR
+          # that is not armed and declines if any check is still pending or failing.
           number=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-            --json number,labels \
-            --jq "map(select(any(.labels[]; .name == \"${LABEL}\"))) | .[0].number // empty")
+            --json number --jq '.[0].number // empty')
           echo "number=${number}" >> "$GITHUB_OUTPUT"
           if [ -z "$number" ]; then
-            echo "No armed PR for ${BRANCH}; nothing to merge."
+            echo "No open PR for ${BRANCH}; nothing to merge."
           fi
 
       - name: Fast-forward merge
         if: steps.pr.outputs.number != ''
-        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
@@ -220,10 +222,12 @@ jobs:
           actor: ${{ github.actor }}
           require-approval: true
           maintainer-only: false
+          require-label: ${{ inputs.label }}
 
   merge-on-review:
     # An approval landed. If the PR was armed before review, no workflow_run fires
-    # on the approval — this retries the merge so a "arm, then approve" order works.
+    # on the approval — this retries the merge so an "arm, then approve" order works.
+    # ff-merge's require-label skips the PR if it is not armed.
     if: >-
       github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
     runs-on: ubuntu-latest
@@ -235,31 +239,13 @@ jobs:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
 
-      - name: Check the PR is armed
-        id: pr
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          LABEL: ${{ inputs.label }}
-        run: |
-          set -euo pipefail
-          armed=$(gh pr view "$PR" --repo "$REPO" --json labels \
-            --jq "any(.labels[]; .name == \"${LABEL}\")")
-          if [ "$armed" = "true" ]; then
-            echo "number=${PR}" >> "$GITHUB_OUTPUT"
-          else
-            echo "PR #${PR} is not armed for auto-merge; nothing to do."
-            echo "number=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Fast-forward merge
-        if: steps.pr.outputs.number != ''
-        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
-          pr-number: ${{ steps.pr.outputs.number }}
+          pr-number: ${{ github.event.pull_request.number }}
           actor: ${{ github.actor }}
           require-approval: true
           maintainer-only: false
+          require-label: ${{ inputs.label }}

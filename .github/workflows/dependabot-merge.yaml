@@ -136,7 +136,7 @@ jobs:
 
       - name: Fast-forward merge
         if: steps.pr.outputs.number != ''
-        uses: bitwise-media-group/ff-merge@182b1c83d954664a09eca1aeee252873504a329a # v1.0.0
+        uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
