@@ -241,9 +241,12 @@ Requires branch protection that requires PR review — the same assumption as th
   `permissions: {}`.
 - **Triggers (the caller owns all four):** `issue_comment` (`created`) and `pull_request` (`labeled`) to arm;
   `pull_request_review` (`submitted`) and `workflow_run` (`completed`) listing your CI workflow name(s) to merge once
-  the PR is approved and green. The label path uses `pull_request` (not `pull_request_target`), so it arms same-repo PRs
-  only — arm a fork PR with the `/auto-merge` comment instead (its merge still runs via the review/CI triggers). None of
-  the triggers run PR code.
+  the PR is approved and green. None of the triggers run PR code.
+- **Fork PRs:** only `issue_comment` and `workflow_run` get base-context secrets on a fork, so the `pull_request`
+  (labeled) and `pull_request_review` jobs are gated to same-repo PRs. A fork PR is **armed with `/auto-merge`** and
+  merges via the comment's immediate attempt or `workflow_run` once CI is green. The one thing forks can't do is
+  auto-merge on a _bare approval_ (no fork-safe event fires on a review) — re-comment `/auto-merge`, or just use
+  `/merge`, which works on forks. Same-repo PRs get all four paths including merge-on-approval.
 
 ```yaml
 on:

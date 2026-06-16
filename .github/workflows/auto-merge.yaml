@@ -39,11 +39,13 @@
 #       and hand it to ff-merge, which fast-forwards it only if it carries the
 #       arming label (require-label) — otherwise ff-merge skips it.
 #
-#   - pull_request_review(submitted, approved) -> merge-on-review
-#       Covers arming a PR *before* it is approved: an approval fires no
+#   - pull_request_review(submitted, approved) -> merge-on-review  [same-repo only]
+#       Covers arming a same-repo PR *before* it is approved: an approval fires no
 #       workflow_run, so this retries the merge when the review lands. ff-merge's
-#       require-label skips the PR if it is not armed. Runs in the base-repo context
-#       with secrets (so it covers fork PRs too).
+#       require-label skips the PR if it is not armed. pull_request_review gets NO
+#       secrets on a fork PR (it runs in the fork merge ref, not the base context),
+#       so this job is gated to same-repo PRs; fork PRs merge via the comment arm
+#       (issue_comment) and workflow_run, both of which DO get base-context secrets.
 #
 # Authorization model: the `/auto-merge` comment is gated to org members
 # (author_association); adding a label already requires triage+ on GitHub. Neither
@@ -213,7 +215,10 @@ jobs:
           fi
 
       - name: Fast-forward merge
+        # Best effort: a decline (not approved/green yet) must not fail the run; it
+        # retries when the next required workflow finishes.
         if: steps.pr.outputs.number != ''
+        continue-on-error: true
         uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}
@@ -225,11 +230,19 @@ jobs:
           require-label: ${{ inputs.label }}
 
   merge-on-review:
-    # An approval landed. If the PR was armed before review, no workflow_run fires
-    # on the approval — this retries the merge so an "arm, then approve" order works.
-    # ff-merge's require-label skips the PR if it is not armed.
+    # An approval landed on a same-repo PR. If it was armed before review, no
+    # workflow_run fires on the approval, so this retries the merge when the review
+    # lands; ff-merge's require-label skips the PR if it is not armed.
+    #
+    # Gated to same-repo PRs: pull_request_review gets NO secrets on a fork PR (it
+    # runs in the fork's merge ref, not the base context), so the App token can't be
+    # minted there. The guard makes a fork approval skip this job cleanly instead of
+    # failing the token mint and leaving a red check that would block the merge gate.
+    # Fork PRs are merged via the /auto-merge comment (issue_comment, base context)
+    # and workflow_run instead.
     if: >-
-      github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+      github.event_name == 'pull_request_review' && github.event.review.state == 'approved' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Mint a github app installation token
@@ -240,6 +253,10 @@ jobs:
           private-key: ${{ secrets.app-private-key }}
 
       - name: Fast-forward merge
+        # Best effort, like the arm attempt: a decline (e.g. CI not green yet) must
+        # not fail the run, or the red check would block ff-merge's own gate. It
+        # retries on the next workflow_run.
+        continue-on-error: true
         uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}

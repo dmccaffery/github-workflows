@@ -8,10 +8,11 @@
 # to cancel. This is the companion to `merge.yaml`: `/merge` merges now, `/auto-merge`
 # merges when ready.
 #
-# The label path uses `pull_request`, which gets no secrets on fork PRs, so it only
-# arms same-repo PRs; arm a fork PR with the `/auto-merge` comment instead (its
-# merge still happens via the review/CI triggers). This keeps `pull_request_target`
-# out of the workflow.
+# Fork PRs: only `issue_comment` and `workflow_run` get base-context secrets on a
+# fork, so the `pull_request` (labeled) and `pull_request_review` jobs are gated to
+# same-repo PRs. Arm a fork PR with the `/auto-merge` comment; it merges via that
+# comment's immediate attempt or `workflow_run` once CI is green. Bare-approval
+# auto-merge is same-repo only — on a fork, re-comment `/auto-merge` or use `/merge`.
 #
 # Requires branch protection that requires PR review (so the approval sets the review
 # decision) — the same assumption as the `/merge` and Dependabot flows.
