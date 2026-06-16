@@ -23,13 +23,16 @@
 # caller's triggering event inside a reusable workflow, so each job gates on its
 # own event — at most one runs per invocation):
 #
-#   - issue_comment(created) `/auto-merge`, or pull_request_target(labeled) -> arm
+#   - issue_comment(created) `/auto-merge`, or pull_request(labeled) -> arm
 #       (Re)apply the label and make one best-effort fast-forward attempt now, in
 #       case the PR is already approved and green (there would be no later
-#       workflow_run/review to fire otherwise). issue_comment / pull_request_target
-#       run in the base-repo context, so the App credentials are available even for
-#       fork PRs. This is the SAFE use of pull_request_target: the workflow never
-#       checks out or runs PR code and interpolates no PR-controlled content.
+#       workflow_run/review to fire otherwise). issue_comment runs in the base-repo
+#       context, so `/auto-merge` arms any PR, forks included. The label path uses
+#       pull_request — NOT pull_request_target — and is gated to same-repo PRs:
+#       forks get no secrets on pull_request (so the App token can't be minted), so
+#       a forked PR is armed by the `/auto-merge` comment instead. This keeps
+#       pull_request_target, and any chance of running PR code with secrets, out of
+#       the workflow entirely.
 #
 #   - workflow_run(completed) -> merge-on-checks
 #       A required CI workflow finished green; resolve the open PR for its branch,
@@ -38,7 +41,7 @@
 #   - pull_request_review(submitted, approved) -> merge-on-review
 #       Covers arming a PR *before* it is approved: an approval fires no
 #       workflow_run, so this retries the merge when the review lands. Runs in the
-#       base context with secrets, like pull_request_target.
+#       base-repo context with secrets (so it covers fork PRs too).
 #
 # Authorization model: the `/auto-merge` comment is gated to org members
 # (author_association); adding a label already requires triage+ on GitHub. Neither
@@ -89,13 +92,15 @@ jobs:
   arm:
     # A maintainer comments /auto-merge, or someone adds the auto-merge label. The
     # comment path is gated to org members; the label path relies on GitHub's own
-    # triage+ requirement for labelling plus the approval gate below.
+    # triage+ requirement for labelling plus the approval gate below, and is scoped
+    # to same-repo PRs (a labelled fork PR has no secrets, so it arms by comment).
     if: >-
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
       github.event.comment.body == inputs.command &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'pull_request_target' && github.event.action == 'labeled' &&
-      github.event.label.name == inputs.label)
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == inputs.label &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     # No GITHUB_TOKEN permissions: the App token (minted below, pull-requests:write)
     # applies the label, posts the confirmation, and does the ref move — so callers

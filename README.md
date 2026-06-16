@@ -239,16 +239,17 @@ Requires branch protection that requires PR review — the same assumption as th
 - **Secrets:** `app-private-key` — required (`secrets.FF_MERGE_PRIVATE_KEY`).
 - **Permissions (caller grants):** none — the App token does the privileged work, so the caller job sets
   `permissions: {}`.
-- **Triggers (the caller owns all four):** `issue_comment` (`created`) and `pull_request_target` (`labeled`) to arm;
+- **Triggers (the caller owns all four):** `issue_comment` (`created`) and `pull_request` (`labeled`) to arm;
   `pull_request_review` (`submitted`) and `workflow_run` (`completed`) listing your CI workflow name(s) to merge once
-  the PR is approved and green. `pull_request_target` / `pull_request_review` are safe — the reusable workflow never
-  checks out or runs PR code.
+  the PR is approved and green. The label path uses `pull_request` (not `pull_request_target`), so it arms same-repo PRs
+  only — arm a fork PR with the `/auto-merge` comment instead (its merge still runs via the review/CI triggers). None of
+  the triggers run PR code.
 
 ```yaml
 on:
   issue_comment:
     types: [created]
-  pull_request_target:
+  pull_request:
     types: [labeled]
   pull_request_review:
     types: [submitted]
