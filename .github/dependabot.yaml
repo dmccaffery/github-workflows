@@ -9,6 +9,9 @@ updates:
       interval: daily
     cooldown:
       default-days: 7
+      # our own actions ship straight through — no cooldown wait
+      exclude:
+        - bitwise-media-group/*
     groups:
       actions:
         patterns:
@@ -19,3 +22,13 @@ updates:
       bitwise-media-group:
         patterns:
           - bitwise-media-group/*
+      codecov:
+        patterns:
+          - codecov/*
+      google:
+        patterns:
+          - google/*
+          - googleapis/*
+      goreleaser:
+        patterns:
+          - goreleaser/*
