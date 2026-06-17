@@ -3,8 +3,8 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately via
-[GitHub Security Advisories](https://github.com/bitwise-media-group/github-workflows/security/advisories/new). Do not
-open public issues for security reports.
+[GitHub Security Advisories](https://github.com/bitwise-media-group/github-workflows/security/advisories/new). Do not open
+public issues for security reports.
 
 ## Threat model (summary)
 
@@ -19,8 +19,7 @@ They defend against:
   trigger events may call it, so the privileged checkout-and-build jobs are gated on a positive allowlist of trusted
   triggers (`push`, `workflow_dispatch`, `schedule`). Anything else — the fork-controllable `pull_request_target`,
   `issue_comment`, and `workflow_run`, or any new event type GitHub adds later — is skipped, so the "pwn request" path
-  fails closed rather than relying on the consumer wiring their caller correctly. See
-  [`security/code-scanning/2.md`](security/code-scanning/2.md) and [`3.md`](security/code-scanning/3.md).
+  fails closed rather than relying on the consumer wiring their caller correctly.
 - **Supply-chain tampering via third-party actions** — every external action is pinned to a full commit SHA with a
   human-readable version comment, so a moved or re-pointed tag cannot change what runs.
 - **Excess privilege** — workflows declare `permissions: {}` at the top level and grant the minimum scopes per job, so a
@@ -30,8 +29,8 @@ They defend against:
   inlining them into the script, avoiding expression-injection.
 
 Out of scope: a compromise of the GitHub Actions runner executing a workflow; a compromise of a consumer repository's
-own secrets, PATs, or branch protections; and the trust placed in first-party `bitwise-media-group` actions referenced
-by these workflows (e.g. `ff-merge`), whose own repositories are the trust anchor.
+own secrets, PATs, or branch protections; and the trust placed in first-party `bitwise-media-group` actions referenced by these
+workflows (e.g. `ff-merge`), whose own repositories are the trust anchor.
 
 ## Code scanning triage
 
