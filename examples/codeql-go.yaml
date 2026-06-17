@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Caller workflow — copy to `.github/workflows/codeql.yaml` in a Go repo. It owns
 # the triggers and grants the analyze permissions; the reusable codeql-go
 # workflow scans actions (build-free) + go (autobuild; setup-go matches go.mod).

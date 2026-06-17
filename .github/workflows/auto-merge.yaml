@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Reusable "auto-merge" — the set-and-forget companion to merge.yaml. Instead of a
 # maintainer timing a `/merge` comment to land after CI finishes, they *arm* a PR
 # once (comment `/auto-merge`, or add the `auto-merge` label) and this workflow

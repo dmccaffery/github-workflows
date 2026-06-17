@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Reusable CodeQL security analysis for Node repos. Scans the repository's GitHub
 # Actions workflows and its JavaScript/TypeScript (the action source). Both are
 # analysed build-free (build-mode: none).

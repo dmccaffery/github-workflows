@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Caller workflow — copy to `.github/workflows/release.yaml` in a Go repo. It
 # owns the push trigger and grants the release permissions; the reusable
 # release-go workflow runs release-please (two-pass) then GoReleaser (archives,

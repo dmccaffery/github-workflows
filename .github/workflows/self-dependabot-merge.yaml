@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # This repo's own caller for the reusable Dependabot auto-merge workflow — the
 # library dogfoods it. Dependabot opens github-actions pin-bump PRs (see
 # .github/dependabot.yaml); minor/patch ones are auto-approved and fast-forwarded

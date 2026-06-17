@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # This repo's own CodeQL run. The workflow library is GitHub Actions YAML only,
 # so it scans just the `actions` language (build-free). There is no actions-only
 # reusable to call, so the analysis is inlined here, mirroring the codeql-*

@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # This repo's own caller for the reusable merge-notice workflow. When a PR is
 # opened it posts a one-time comment explaining this repo merges via `/merge`
 # (see self-merge.yaml). Calls the reusable workflow by local path so it tracks

@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Caller workflow — copy to `.github/workflows/ci.yaml` in a GitHub Actions repo.
 # It owns the push/pull_request triggers; all the work lives in the reusable
 # ci-actions workflow. The repo must provide the npm scripts check / typecheck /

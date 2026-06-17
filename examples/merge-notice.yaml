@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Caller workflow — copy to `.github/workflows/merge-notice.yaml` in a consuming
 # repo. When a PR is opened it posts a one-time comment explaining the repo
 # merges via `/merge` (see examples/merge.yaml). Optional but friendly for

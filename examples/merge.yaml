@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Caller workflow — copy to `.github/workflows/merge.yaml` in a consuming repo.
 #
 # This is the only per-repo boilerplate. It owns the trigger; the first-pass

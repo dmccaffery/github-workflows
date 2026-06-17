@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Reusable CodeQL security analysis for Go repos. Scans the repository's GitHub
 # Actions workflows (build-free) and its Go module. Go does not support
 # build-mode: none, so it uses autobuild: setup-go installs the toolchain

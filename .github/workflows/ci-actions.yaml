@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Reusable CI for GitHub Actions repos (Node/TypeScript): lint, typecheck, unit
 # tests with coverage, a fresh build, and a dist-reproducibility gate (the
 # committed dist/ must match a build from src/), then a Codecov upload isolated

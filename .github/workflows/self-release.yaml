@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # This repo's own release. Release-please watches main and keeps a release PR
 # current from the Conventional Commit history; when that PR merges it cuts the
 # GitHub release and vX.Y.Z tag. The publish job then moves the floating major

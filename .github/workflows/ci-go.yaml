@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Reusable CI for Go repos: build, vet, race-detector tests with coverage,
 # vulnerability scan, and prose lint, then a Codecov upload isolated from
 # PR-supplied code. The Go version comes from go.mod, never the workflow.

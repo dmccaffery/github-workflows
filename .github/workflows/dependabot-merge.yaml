@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Reusable Dependabot auto-merge. Dependabot opens a PR; if it is a minor or
 # patch update this approves it, then fast-forwards it into the base branch once
 # CI is green — preserving Dependabot's signed commits with the same `ff-merge`

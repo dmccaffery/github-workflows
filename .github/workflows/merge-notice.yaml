@@ -1,3 +1,6 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
 # Reusable PR-opened notice — posts a one-time comment when a PR is opened,
 # explaining that this repo merges by fast-forward (a maintainer comments
 # `/merge`) so newcomers don't reach for the GitHub merge button. Companion to
