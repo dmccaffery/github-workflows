@@ -1,13 +1,6 @@
 {
-  "name": "setup-evolve",
-  "version": "0.1.0",
-  "description": "GitHub Action to install the evolve CLI with supply-chain verification",
+  "name": "github-workflows",
   "private": true,
-  "type": "module",
-  "main": "dist/index.js",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
     "format": "prettier --write \"**/*.md\"",
     "format:check": "prettier --check \"**/*.md\"",
