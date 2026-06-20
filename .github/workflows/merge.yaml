@@ -104,6 +104,12 @@ jobs:
         with:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
+          # Least-privilege within the App's installation ceiling: ff-merge moves the
+          # base ref (contents), reads/comments on the PR (pull-requests), and
+          # resolves the actor's access level for maintainer-only (administration).
+          permission-contents: write
+          permission-pull-requests: write
+          permission-administration: read
 
       - name: Fast-forward merge
         uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
@@ -140,6 +146,11 @@ jobs:
         with:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
+          # Labels and comments on the PR (pull-requests) and moves the ref via the
+          # best-effort ff-merge (contents); maintainer-only:false here, so no
+          # administration scope is needed.
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Resolve the pull request number
         id: pr
@@ -222,6 +233,10 @@ jobs:
         with:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
+          # ff-merge moves the ref (contents) and reads the PR (pull-requests);
+          # maintainer-only:false here, so no administration scope is needed.
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Resolve the open PR for this branch
         id: pr
@@ -282,6 +297,10 @@ jobs:
         with:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
+          # ff-merge moves the ref (contents) and reads the PR (pull-requests);
+          # maintainer-only:false here, so no administration scope is needed.
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Fast-forward merge
         # Best effort, like the arm attempt: a decline (e.g. CI not green yet) must

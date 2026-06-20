@@ -75,6 +75,9 @@ jobs:
         with:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
+          # Approve-only path: reads the PR's metadata and records an approval
+          # (pull-requests). It never moves a ref, so it gets no contents scope.
+          permission-pull-requests: write
 
       - name: Fetch Dependabot metadata
         id: meta
@@ -119,6 +122,11 @@ jobs:
         with:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
+          # ff-merge moves the ref (contents) and reads the PR (pull-requests);
+          # the approval (minor/patch only) is the authorization gate, not
+          # maintainer-only, so no administration scope is needed.
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Resolve the open Dependabot PR for this branch
         id: pr

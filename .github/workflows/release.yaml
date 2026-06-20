@@ -82,6 +82,8 @@ jobs:
       # could not see it.
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false # release-please authenticates with GITHUB_TOKEN, not the persisted credential
 
       # The goreleaser output is the config-file hash (empty when absent), used
       # downstream as a truthy flag to pick the goreleaser vs publish job.
@@ -150,12 +152,15 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
           fetch-depth: 0 # GoReleaser needs full history + tags for the changelog
+          persist-credentials: false # GoReleaser publishes via the GITHUB_TOKEN env, not the persisted credential
 
       - name: Setup go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
-          cache: true
+          # No build cache in the release-signing job: a cache poisoned from a
+          # less-trusted context must not feed the signed, attested artifacts.
+          cache: false
 
       # cosign for the binary_signs keyless signing config.
       - name: Setup cosign
@@ -215,6 +220,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false # build + verify only; vanity tags move via the GITHUB_TOKEN env
 
       # Only a root go.mod (not the universal addlicense go.work/tools/go.mod) marks
       # a repo that builds Go; a `make build` for a non-Go repo needs no toolchain.
