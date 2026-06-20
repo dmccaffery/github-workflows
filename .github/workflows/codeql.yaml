@@ -9,6 +9,15 @@
 # gets all three. (go.work / tools/go.mod -- the addlicense tooling every repo
 # carries -- is not a Go-product signal, so only a root go.mod adds the go leg.)
 #
+# The `languages` input overrides detection: pass an explicit list (e.g. "actions")
+# to pin the matrix and skip the root probing -- useful when a tooling-only
+# package.json would otherwise add an empty javascript-typescript leg.
+#
+# Alongside CodeQL, the actions leg also runs zizmor (GitHub Actions static
+# analysis) whenever the repo ships a zizmor config file (zizmor.yml/.yaml at the
+# root or under .github/) -- its presence is how a consumer opts in. zizmor uploads
+# its own SARIF to code scanning and, in SARIF mode, never fails the run on findings.
+#
 # Go has no build-free mode, so autobuild observes a real `go build`; setup-go
 # installs the toolchain matched to go-version-file (default go.mod), never the
 # workflow.
@@ -31,14 +40,23 @@ on:
         required: false
         default: ""
         type: string
+      languages:
+        description:
+          Comma-separated CodeQL languages to analyse (e.g. "actions" or "actions,go"), overriding root
+          detection. Empty (default) auto-detects actions, plus go (root go.mod) and javascript-typescript
+          (package.json). Set this when detection would add an empty leg -- e.g. a tooling-only package.json.
+        required: false
+        default: ""
+        type: string
 
 # granted per job
 permissions: {}
 
 jobs:
-  # Build the language matrix from what's at the repo root. hashFiles is evaluated
-  # after checkout (a job-level `if:` could not see the workspace), so the JSON is
-  # assembled in this step. `actions` is always scanned.
+  # Build the language matrix. An explicit `languages` input is used verbatim;
+  # otherwise it's detected from the repo root. hashFiles is evaluated after
+  # checkout (a job-level `if:` could not see the workspace), so the JSON is
+  # assembled in this step. `actions` is always scanned when detecting.
   prep:
     runs-on: ubuntu-latest
     permissions:
@@ -52,16 +70,43 @@ jobs:
         with:
           persist-credentials: false # read-only checkout; don't leave the token in .git/config
 
-      - name: Detect languages
+      - name: Resolve languages
         id: detect
+        # Pass workflow expressions in through env vars instead of interpolating ${{ }}
+        # into the script. That keeps them out of the shell-code sink CodeQL tracks
+        # (actions/code-injection) and, for the free-form `languages` caller input, stops
+        # a supplied value being parsed as shell. hashFiles() can only yield "" or a hex
+        # digest so it carries no metacharacters, but the same indirection is the
+        # documented best practice for the rule.
+        env:
+          LANGUAGES: ${{ inputs.languages }}
+          GO_MOD_HASH: ${{ hashFiles('go.mod') }}
+          PACKAGE_JSON_HASH: ${{ hashFiles('package.json') }}
         run: |
           set -eu
-          langs='{"language":"actions","build-mode":"none"}'
-          if [ -n "${{ hashFiles('go.mod') }}" ]; then
-            langs="$langs,{\"language\":\"go\",\"build-mode\":\"autobuild\"}"
-          fi
-          if [ -n "${{ hashFiles('package.json') }}" ]; then
-            langs="$langs,{\"language\":\"javascript-typescript\",\"build-mode\":\"none\"}"
+          # An explicit `languages` input wins; otherwise detect from the repo root.
+          # `actions` is always present, `go` (autobuild) needs a root go.mod and
+          # `javascript-typescript` a package.json. go is the only compiled language
+          # here, so everything else analyses build-free (build-mode: none).
+          if [ -n "$LANGUAGES" ]; then
+            langs=""
+            IFS=', '
+            for lang in $LANGUAGES; do
+              if [ -z "$lang" ]; then continue; fi
+              case "$lang" in
+                go) mode=autobuild ;;
+                *) mode=none ;;
+              esac
+              langs="${langs:+$langs,}{\"language\":\"$lang\",\"build-mode\":\"$mode\"}"
+            done
+          else
+            langs='{"language":"actions","build-mode":"none"}'
+            if [ -n "$GO_MOD_HASH" ]; then
+              langs="$langs,{\"language\":\"go\",\"build-mode\":\"autobuild\"}"
+            fi
+            if [ -n "$PACKAGE_JSON_HASH" ]; then
+              langs="$langs,{\"language\":\"javascript-typescript\",\"build-mode\":\"none\"}"
+            fi
           fi
           echo "matrix={\"include\":[$langs]}" >> "$GITHUB_OUTPUT"
 
@@ -109,3 +154,13 @@ jobs:
         uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           category: "/language:${{ matrix.language }}"
+
+      # Audit the repo's workflows with zizmor on the actions leg only (it scans
+      # GitHub Actions, not Go or JS/TS), and only when a zizmor config file is
+      # detected -- that presence is how a consumer opts in. advanced-security (on
+      # by default) uploads the SARIF to code scanning using the security-events
+      # permission already granted to this job; in SARIF mode zizmor exits 0 even
+      # with findings, so this step never fails the run.
+      - name: Run zizmor
+        if: matrix.language == 'actions' && hashFiles('zizmor.yml', 'zizmor.yaml', '.github/zizmor.yml', '.github/zizmor.yaml') != ''
+        uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d # v0.5.6
