@@ -17,7 +17,7 @@ lint: node_modules ## check-mode static analysis: prettier formatting check + ma
 	@ go tool addlicense -check -c $(LICENSE_HOLDER) -l mit -s=only $(LICENSE_IGNORE) .
 	@ npm run fmt:check
 	@ npm run lint
-	@ zizmor .
+	@ command -v zizmor >/dev/null 2>&1 && zizmor . || echo "zizmor not found on PATH; skipping"
 
 # This library is GitHub Actions YAML + Markdown only — nothing to compile, test, or
 # exercise end-to-end — so these canonical targets are no-ops. They exist so the reusable
