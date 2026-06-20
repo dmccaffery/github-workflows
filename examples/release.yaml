@@ -29,11 +29,11 @@ permissions:
   issues: write
   # release-please opens the release pull request
   pull-requests: write
-  # cosign keyless signing -- GoReleaser path only; drop if you have no .goreleaser.yaml
+  # cosign keyless signing
   id-token: write
-  # github build-provenance attestation -- GoReleaser path only
+  # github build-provenance attestation
   attestations: write
-  # artifact storage record for the attestation -- GoReleaser path only
+  # artifact storage record for the attestation
   artifact-metadata: write
 
 jobs:
