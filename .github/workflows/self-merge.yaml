@@ -23,7 +23,7 @@
 # bypass list.
 name: Merge
 
-on:
+on: # zizmor: ignore[dangerous-triggers] -- required: workflow_run gates auto-merge on CI; no PR code is checked out or run
   issue_comment:
     types: [created]
   pull_request:

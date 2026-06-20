@@ -21,7 +21,7 @@
 # bypass list — the same App as the /merge flow.
 name: Dependabot auto-merge
 
-on:
+on: # zizmor: ignore[dangerous-triggers] -- required: approve needs base-repo secrets; no PR code is checked out or run
   pull_request_target:
     types: [opened, reopened, synchronize]
   workflow_run:

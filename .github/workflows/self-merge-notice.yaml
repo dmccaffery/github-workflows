@@ -12,7 +12,7 @@
 
 name: Merge notice
 
-on:
+on: # zizmor: ignore[dangerous-triggers] -- required: notice must reach fork PRs; only posts a static comment, no PR code is run
   pull_request_target:
     types: [opened]
 
