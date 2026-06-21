@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v1.1.0...v2.0.0) (2026-06-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* the reusable workflow moved from .github/workflows/codeql.yaml to .github/workflows/security.yaml. Consumers must update their caller's uses: from bitwise-media-group/github-workflows/.github/workflows/codeql.yaml@<ref> to .../security.yaml@<ref>.
+* auto-merge.yaml is removed; its behaviour now lives in merge.yaml (wire the four auto-merge triggers on the caller). merge.yaml no longer accepts a pr-number input (it resolves the PR from the event), and the auto-merge arming comment input is now 'arm-command' (was 'command'). Consumers pinned @v1 are unaffected until they move to @v2.
+* the per-language workflow files are removed. Consumers must repoint uses: to ci.yaml/codeql.yaml/release.yaml@v2, provide the canonical Makefile targets (stubbing N/A ones as no-ops), and set vanity-tags: true to keep the floating major tag.
+
+### Features
+
+* add a languages override and opt-in zizmor scan to the CodeQL workflow ([ba40cbc](https://github.com/bitwise-media-group/github-workflows/commit/ba40cbcbf53291edb37d491ba0c4bcda2fcb25c9))
+* fold auto-merge into the merge workflow ([6497957](https://github.com/bitwise-media-group/github-workflows/commit/6497957be31da28483d73d1f8448aa321571bb93))
+* generalize ci/codeql/release into language-agnostic workflows ([bf13819](https://github.com/bitwise-media-group/github-workflows/commit/bf138192fe829d1fb26597cd37aa57fa1d994a7c))
+* rename reusable codeql workflow to security, standardise names ([75ae004](https://github.com/bitwise-media-group/github-workflows/commit/75ae00493a0b68dd5e7e65eb9ef992f6e457f1ca))
+
+
+### Bug Fixes
+
+* harden reusable workflow security posture ([7f4724a](https://github.com/bitwise-media-group/github-workflows/commit/7f4724a7252551d0d540806bc806fe65c3335cfa))
+* **merge:** do not cancel pending ff-merge events ([048f8c2](https://github.com/bitwise-media-group/github-workflows/commit/048f8c2b8682c7d24ec4c14dd1fa920524aee3a6))
+* **merge:** request workflows scope so ff-merge can push workflow-file changes ([7ac5ca8](https://github.com/bitwise-media-group/github-workflows/commit/7ac5ca81c1de918bc23d5da917c82a89c2f63d72))
+* **release-go:** re-pin release-please-action to its current v5.0.0 commit ([dfa6330](https://github.com/bitwise-media-group/github-workflows/commit/dfa633002ef98b9c9d7be4b92762cd68aa385e12))
+
 ## [1.1.0](https://github.com/bitwise-media-group/github-workflows/compare/v1.0.0...v1.1.0) (2026-06-16)
 
 
