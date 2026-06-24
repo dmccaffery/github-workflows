@@ -1,0 +1,24 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
+# This repo's own caller for the reusable review-ack workflow. It completes on an
+# approving review so its workflow_run re-enters self-merge.yaml's
+# merge-on-review-completed job in base context — the path that lets a fork PR
+# auto-merge promptly when the approval lands after CI is already green (see
+# self-merge.yaml). Calls the reusable workflow by local path so it tracks this repo's
+# current definition rather than a pinned release.
+#
+# No secret needed — it does no privileged work; the completed run is the only signal.
+
+name: Merge Review Ack
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+# does no privileged work; grants nothing
+permissions: {}
+
+jobs:
+  ack:
+    uses: ./.github/workflows/merge-review-ack.yaml

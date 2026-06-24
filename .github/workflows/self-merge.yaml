@@ -11,12 +11,15 @@
 # the reusable workflow by local path (`./.github/workflows/...`), so it always
 # exercises this repo's current definition rather than a release.
 #
-# All four triggers are routed by github.event_name inside merge.yaml. issue_comment
-# runs in the base-repo context (so `/merge` and `/auto-merge` work even for fork
-# PRs); the label-arm and review paths are same-repo only. The workflow_run list
-# names every workflow that must pass — "Continuous Integration" (self-ci.yaml) and
-# "Security Analysis" (self-security.yaml); whichever finishes last triggers the attempt
-# and ff-merge re-verifies all checks.
+# Triggers are routed by github.event_name inside merge.yaml. Every one is an event that
+# does NOT attach a check run to the PR (issue_comment, workflow_run, schedule), so the
+# merge machinery adds no skipped-job clutter to the PR's checks list. issue_comment runs
+# in the base-repo context (so `/merge` and `/auto-merge` work even for fork PRs). The
+# workflow_run list names every workflow that must pass — "Continuous Integration"
+# (self-ci.yaml) and "Security Analysis" (self-security.yaml) — plus "Merge Review Ack"
+# (self-merge-review-ack.yaml), whose completion turns an approval into a merge attempt
+# (fork and same-repo alike); whichever finishes last triggers the attempt and ff-merge
+# re-verifies all checks. The schedule sweeps armed PRs as a final backstop.
 #
 # Org prerequisites (see bitwise-media-group/ff-merge): the FF_MERGE_CLIENT_ID
 # variable + FF_MERGE_PRIVATE_KEY secret, and the "FF Merge" App in main's ruleset
@@ -26,13 +29,11 @@ name: Merge
 on: # zizmor: ignore[dangerous-triggers] -- required: workflow_run gates auto-merge on CI; no PR code is checked out or run
   issue_comment:
     types: [created]
-  pull_request:
-    types: [labeled]
-  pull_request_review:
-    types: [submitted]
   workflow_run:
-    workflows: ["Continuous Integration", "Security Analysis"]
+    workflows: ["Continuous Integration", "Security Analysis", "Merge Review Ack"]
     types: [completed]
+  schedule:
+    - cron: "17 * * * *"
 
 # the App token does the privileged work; the caller grants nothing
 permissions: {}

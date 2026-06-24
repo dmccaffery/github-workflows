@@ -19,6 +19,7 @@ action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 | [`security.yaml`](#securityyaml)                 | any      | CodeQL over actions + go (autobuild) + javascript-typescript, language matrix by detection                       |
 | [`release.yaml`](#releaseyaml)                   | any      | release-please (two-pass) → GoReleaser (if `.goreleaser.yaml`) or `dist/` rebuild + verify; optional vanity tags |
 | [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward merge — `/merge` now, or `/auto-merge` (comment/label) when approved + green   |
+| [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                    |
 | [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                              |
 | [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                 |
 
@@ -140,25 +141,32 @@ that requires PR review. See [org setup](#fast-forward-merge-org-setup).
   (default `true`).
 - **Secrets:** `app-private-key` — required (`secrets.FF_MERGE_PRIVATE_KEY`).
 - **Permissions (caller grants):** none — the App token does the privileged work, so the caller sets `permissions: {}`.
-- **Triggers (the caller owns all four):** `issue_comment` (`created`) drives `/merge` and arms `/auto-merge`;
-  `pull_request` (`labeled`) arms via label; `pull_request_review` (`submitted`) and `workflow_run` (`completed`,
-  listing your CI workflow name(s)) attempt the auto-merge once approved and green. A `/merge`-only repo can trigger
-  just `issue_comment`. None of the triggers run PR code, and none use `pull_request_target`.
-- **Fork PRs:** only `issue_comment` and `workflow_run` carry base-context secrets on a fork, so the label-arm and
-  review jobs are gated to same-repo PRs. Arm a fork PR with `/auto-merge` (it merges via that attempt or
-  `workflow_run`), or just use `/merge`.
+- **Triggers (the caller owns them):** `issue_comment` (`created`) drives `/merge` and arms `/auto-merge`;
+  `workflow_run` (`completed`, listing your CI workflow name(s) plus `Merge Review Ack`) attempts the auto-merge once
+  approved and green; the `schedule` sweeps armed PRs as a backstop. A `/merge`-only repo can trigger just
+  `issue_comment`. Every trigger is one that does **not** attach a check run to the PR (no `pull_request`,
+  `pull_request_review`, or `pull_request_target`), so the workflow leaves no skipped-job clutter on the PR's checks
+  list, and none run PR code.
+- **No skipped-check clutter:** because the approval signal (the PR-attached `pull_request_review` event) is captured by
+  the companion [`merge-review-ack.yaml`](#merge-review-ackyaml) and re-enters via `workflow_run`, the only check this
+  system adds to a PR is that companion's single `ack` job. The arm path also responds only to the `/auto-merge`
+  comment; adding the `auto-merge` label by hand still arms (the label is the durable state), and the merge then happens
+  on the next `workflow_run` or the scheduled sweep.
+- **Fork PRs:** `issue_comment` and `workflow_run` carry base-context secrets on a fork, so fork and same-repo PRs
+  auto-merge identically — arm with `/auto-merge` and an approval (routed through `merge-review-ack.yaml`) completes the
+  merge. Install that companion and keep `Merge Review Ack` in the `workflow_run` list; the scheduled `sweep` backstops
+  any missed trigger.
 
 ```yaml
 on:
   issue_comment:
     types: [created]
-  pull_request:
-    types: [labeled]
-  pull_request_review:
-    types: [submitted]
   workflow_run:
-    workflows: ["CI"] # your CI workflow name(s) — all that must be green
+    # your CI workflow name(s) — all that must be green — plus the review-ack companion
+    workflows: ["CI", "Merge Review Ack"]
     types: [completed]
+  schedule:
+    - cron: "17 * * * *" # backstop sweep of armed PRs; tune or remove
 permissions: {}
 jobs:
   merge:
@@ -169,7 +177,35 @@ jobs:
       app-private-key: ${{ secrets.FF_MERGE_PRIVATE_KEY }}
 ```
 
-Full example: [`examples/merge.yaml`](examples/merge.yaml).
+Full example: [`examples/merge.yaml`](examples/merge.yaml). Pair it with
+[`merge-review-ack.yaml`](#merge-review-ackyaml).
+
+### `merge-review-ack.yaml`
+
+_Any repo._ Required companion to [`merge.yaml`](#mergeyaml): it carries the **approval** signal for auto-merge.
+`merge.yaml` deliberately subscribes to no PR-attached events (to avoid skipped-check clutter), but an approval only
+exists as the PR-attached `pull_request_review` event — which also carries no secrets on a fork. This workflow's single
+job completes on an approving review purely so its `workflow_run(completed)` re-enters `merge.yaml`'s
+`merge-on-review-completed` job in base context, where the App token is minted and the fast-forward done. That makes
+fork and same-repo PRs merge identically on approval, and it is the **only** check this merge system adds to a PR. It
+does no privileged work and needs no secrets; `ff-merge` re-verifies approval, checks, label, and fast-forwardness
+before moving the ref. Add `Merge Review Ack` to your `merge.yaml` caller's `workflow_run` list.
+
+- **Inputs:** none.
+- **Secrets:** none.
+- **Permissions (caller grants):** none.
+
+```yaml
+on:
+  pull_request_review:
+    types: [submitted]
+permissions: {}
+jobs:
+  ack:
+    uses: bitwise-media-group/github-workflows/.github/workflows/merge-review-ack.yaml@v2
+```
+
+Full example: [`examples/merge-review-ack.yaml`](examples/merge-review-ack.yaml).
 
 ### `merge-notice.yaml`
 
@@ -201,7 +237,9 @@ _Any repo._ Auto-approves Dependabot **minor and patch** PRs, then fast-forwards
 green — using the same signature-preserving `ff-merge` action as [`merge.yaml`](#mergeyaml). Major updates are never
 approved, so they wait for a human. Both the approval and the merge are done with the "FF Merge" App token, so approval
 works regardless of the org "Allow GitHub Actions to approve pull requests" setting (that only restricts
-`GITHUB_TOKEN`). Requires a
+`GITHUB_TOKEN`). It triggers only on `workflow_run` — an event that adds no check run to the PR, so it leaves no
+skipped-job clutter — and reads the minor/patch-vs-major policy from the trailer in Dependabot's commit, only after
+verifying the head commit is authored by `dependabot[bot]` and carries a valid signature. Requires a
 [`.github/dependabot.yaml`](https://docs.github.com/en/code-security/dependabot/dependabot-version-updates) so
 Dependabot opens PRs, and branch protection that requires PR review (so the approval sets the review decision) — the
 same assumption as the `/merge` flow.
@@ -211,14 +249,12 @@ same assumption as the `/merge` flow.
 - **Secrets:** `app-private-key` — required (`secrets.FF_MERGE_PRIVATE_KEY`).
 - **Permissions (caller grants):** none — the App token does the privileged work, so the caller job sets
   `permissions: {}`.
-- **Triggers (the caller owns both):** `pull_request_target` (`opened`/`reopened`/`synchronize`) to approve on open, and
-  `workflow_run` (`completed`) listing your CI workflow name(s) to fast-forward once they finish green. `check_suite` is
-  _not_ used — GitHub does not fire it for a repo's own Actions CI.
+- **Triggers (the caller owns it):** `workflow_run` (`completed`) listing your CI workflow name(s) — the reusable
+  workflow approves and fast-forwards once they finish green. No `pull_request_target` (so no skipped-check clutter);
+  `check_suite` is _not_ used either — GitHub does not fire it for a repo's own Actions CI.
 
 ```yaml
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize]
   workflow_run:
     workflows: ["CI"] # your CI workflow name(s) — all that must be green
     types: [completed]
@@ -281,10 +317,11 @@ This repo dogfoods its own reusable workflows by local path: `self-ci.yaml` call
 there is no root `go.mod` — and runs the canonical `make` gates) and `self-release.yaml` calls `release.yaml` (the
 publish path, moving the vanity tags). `self-security.yaml` stays a bespoke `actions`-only scan: the library has no
 compilable Go and no JS/TS product source, so the reusable `security.yaml` would add an empty `javascript-typescript`
-leg from its tooling-only `package.json`. The `/merge` + auto-merge flows (`self-merge.yaml`), the merge notice
-(`self-merge-notice.yaml`), and Dependabot auto-merge (`self-dependabot-merge.yaml`, which keeps the reusable workflows'
-action pins fresh) dogfood the rest. Validate a change to a reusable workflow by temporarily pointing a real consumer's
-caller at a feature branch or SHA (`@your-branch`) and opening a PR there.
+leg from its tooling-only `package.json`. The `/merge` + auto-merge flows (`self-merge.yaml`), its fork-PR review-ack
+companion (`self-merge-review-ack.yaml`), the merge notice (`self-merge-notice.yaml`), and Dependabot auto-merge
+(`self-dependabot-merge.yaml`, which keeps the reusable workflows' action pins fresh) dogfood the rest. Validate a
+change to a reusable workflow by temporarily pointing a real consumer's caller at a feature branch or SHA
+(`@your-branch`) and opening a PR there.
 
 ## Releasing this repo
 

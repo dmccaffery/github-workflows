@@ -11,7 +11,9 @@
 #
 # `/merge` merges now; `/auto-merge` merges when ready. The label is the load-bearing
 # auto-merge state — a `/auto-merge` comment is ephemeral, so it simply applies the
-# label and everything downstream keys off it (remove the label to cancel).
+# label and everything downstream keys off it (remove the label to cancel). The label
+# may also be added by hand; the merge then happens on the next CI completion or the
+# scheduled sweep (whichever lands first once the PR is approved and green).
 #
 # There is no single GitHub event for "all of a repo's own Actions checks are done"
 # (GitHub does not fire check_suite/check_run for runs started by GITHUB_TOKEN), so
@@ -20,18 +22,28 @@
 # re-verifies that ALL checks are green, the PR is approved, the move is a genuine
 # fast-forward, and the arming label is present (require-label) before moving the ref.
 #
-# Four events, handled by four mutually-exclusive jobs (github.event is the caller's
+# Events are handled by mutually-exclusive jobs (github.event is the caller's
 # triggering event inside a reusable workflow, so each job gates on its own event and
-# at most the relevant ones run per invocation). No pull_request_target is used or
-# needed here — that lives only in the separate dependabot-merge.yaml (Dependabot
-# approval needs base-repo secrets) and merge-notice.yaml (the notice reaches fork
-# PRs). Keeping them separate keeps this workflow off the elevated trigger entirely.
+# at most the relevant ones run per invocation). Every trigger is one that does NOT
+# attach a check run to the PR's head commit — issue_comment, workflow_run, schedule —
+# so the auto-merge machinery leaves no skipped-job clutter on the PR's checks list.
+# The approval signal, which only exists as the PR-attached pull_request_review event,
+# is captured out-of-band by the companion merge-review-ack.yaml (its one job is the
+# only PR-attached check the system creates) and re-enters here as a workflow_run. No
+# pull_request_target is used or needed — that lives only in the separate
+# dependabot-merge.yaml and merge-notice.yaml.
 #
-#   - issue_comment(created) `/merge`                       -> manual
-#   - issue_comment(created) `/auto-merge`, or
-#     pull_request(labeled)                                 -> arm
-#   - workflow_run(completed)                               -> merge-on-checks
-#   - pull_request_review(submitted, approved)              -> merge-on-review  [same-repo]
+# Approval re-entry also closes a fork-PR gap: pull_request_review carries no secrets on
+# a fork, so an approval there can never mint a token directly. Routing every approval
+# through the ack -> workflow_run path (base context, secrets) makes fork and same-repo
+# PRs behave identically — merge-on-review-completed handles both. A scheduled `sweep`
+# is a final backstop for any missed trigger.
+#
+#   - issue_comment(created) `/merge`                    -> manual
+#   - issue_comment(created) `/auto-merge`               -> arm
+#   - workflow_run(completed, event=pull_request)        -> merge-on-checks
+#   - workflow_run(completed, event=pull_request_review) -> merge-on-review-completed  [via review-ack]
+#   - schedule                                           -> sweep-prep + sweep-merge   [backstop]
 #
 # Authorization: the `/merge` and `/auto-merge` comments are gated to org members
 # (author_association); adding a label already requires triage+ on GitHub. Neither is
@@ -126,16 +138,17 @@ jobs:
           maintainer-only: ${{ inputs.maintainer-only }}
 
   arm:
-    # A maintainer comments /auto-merge, or someone adds the auto-merge label. The
-    # comment path is gated to org members; the label path relies on GitHub's own
-    # triage+ requirement for labelling plus the approval gate below, and is scoped
-    # to same-repo PRs (a labelled fork PR has no secrets, so it arms by comment).
+    # A maintainer comments /auto-merge. Gated to org members; ff-merge re-verifies
+    # approval and write access authoritatively before any ref moves, so this only
+    # filters noise. issue_comment runs in the base-repo context, so this arms fork
+    # PRs too. (Adding the `auto-merge` label by hand also arms — the label is the
+    # state require-label keys on — but there is no pull_request(labeled) trigger:
+    # that event attaches skipped-job checks to the PR, so a hand-added label simply
+    # merges on the next workflow_run or the scheduled sweep instead of instantly.)
     if: >-
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.body ==
+      github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.body ==
       inputs.arm-command && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
-      github.event.comment.author_association)) || (github.event_name == 'pull_request' && github.event.action ==
-      'labeled' && github.event.label.name == inputs.label && github.event.pull_request.head.repo.full_name ==
-      github.repository)
+      github.event.comment.author_association)
     runs-on: ubuntu-latest
     concurrency:
       group: ff-merge-${{ github.repository }}
@@ -156,38 +169,25 @@ jobs:
           permission-pull-requests: write
           permission-workflows: write
 
-      - name: Resolve the pull request number
-        id: pr
-        env:
-          # issue_comment carries issue.number; labeled carries pull_request.number.
-          # The unused one renders empty, so the first non-empty wins.
-          FROM_COMMENT: ${{ github.event.issue.number }}
-          FROM_LABEL: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          number="${FROM_COMMENT:-}"
-          [ -n "$number" ] || number="${FROM_LABEL:-}"
-          echo "number=${number}" >> "$GITHUB_OUTPUT"
-
       - name: Ensure the auto-merge label is present
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
-          PR: ${{ steps.pr.outputs.number }}
+          # issue_comment on a PR: issue.number is the PR number.
+          PR: ${{ github.event.issue.number }}
           LABEL: ${{ inputs.label }}
         run: |
           set -euo pipefail
-          # Idempotent: a no-op when armed via the label, applies it when armed via
-          # the comment. --add-label creates the label if the repo lacks it.
+          # The /auto-merge comment is ephemeral; the label is the durable armed state
+          # every downstream job keys on. --add-label creates the label if the repo
+          # lacks it, and is a no-op if it is already present.
           gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL"
 
       - name: Confirm arming
-        # Only on the comment path — re-labelling shouldn't spam the thread.
-        if: github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
-          PR: ${{ steps.pr.outputs.number }}
+          PR: ${{ github.event.issue.number }}
           LABEL: ${{ inputs.label }}
         run: |
           set -euo pipefail
@@ -205,14 +205,14 @@ jobs:
       - name: Attempt fast-forward now (best effort)
         # ff-merge declines if the PR isn't yet approved or any required check is
         # pending or failing — expected while CI runs, so a decline here must not
-        # fail the run. The merge-on-checks / merge-on-review jobs retry when the
-        # state changes; an already-approved, already-green PR merges right here.
+        # fail the run. The merge-on-checks / merge-on-review-completed jobs retry when
+        # the state changes; an already-approved, already-green PR merges right here.
         continue-on-error: true
         uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
-          pr-number: ${{ steps.pr.outputs.number }}
+          pr-number: ${{ github.event.issue.number }}
           actor: ${{ github.actor }}
           require-approval: true
           maintainer-only: false
@@ -277,20 +277,22 @@ jobs:
           maintainer-only: false
           require-label: ${{ inputs.label }}
 
-  merge-on-review:
-    # An approval landed on a same-repo PR. If it was armed before review, no
-    # workflow_run fires on the approval, so this retries the merge when the review
-    # lands; ff-merge's require-label skips the PR if it is not armed.
-    #
-    # Gated to same-repo PRs: pull_request_review gets NO secrets on a fork PR (it
-    # runs in the fork's merge ref, not the base context), so the App token can't be
-    # minted there. The guard makes a fork approval skip this job cleanly instead of
-    # failing the token mint and leaving a red check that would block the merge gate.
-    # Fork PRs are merged via the /auto-merge comment (issue_comment, base context)
-    # and workflow_run instead.
+  merge-on-review-completed:
+    # The approval path for EVERY PR, fork and same-repo alike. pull_request_review is
+    # the only event that signals an approval, but it attaches a skipped-job check to
+    # the PR and carries no secrets on a fork — so this workflow does not subscribe to
+    # it directly. Instead the companion "Merge Review Ack" caller (merge-review-ack.yaml)
+    # runs on that approval with no secrets, and its completion fires THIS workflow_run
+    # in the base context, where the token can be minted. That both keeps the PR's
+    # checks list clean (the ack's single job is the only attached check) and closes the
+    # fork gap (an approval that lands after CI is already green still completes the
+    # merge). Distinguished from merge-on-checks by the triggering event
+    # (pull_request_review vs pull_request); the ack only completes
+    # successfully on an approval, so conclusion == 'success' means "approval landed".
+    # ff-merge's require-label/require-approval re-verify everything before moving the ref.
     if: >-
-      github.event_name == 'pull_request_review' && github.event.review.state == 'approved' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request_review' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: ff-merge-${{ github.repository }}
@@ -310,16 +312,115 @@ jobs:
           permission-pull-requests: write
           permission-workflows: write
 
+      - name: Resolve the open PR for this branch
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          # workflow_run carries the branch, not the PR; find its open PR (same
+          # resolution as merge-on-checks). ff-merge skips a PR that is not armed and
+          # declines if any check is still pending or failing.
+          number=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+            --json number --jq '.[0].number // empty')
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          if [ -z "$number" ]; then
+            echo "No open PR for ${BRANCH}; nothing to merge."
+          fi
+
       - name: Fast-forward merge
-        # Best effort, like the arm attempt: a decline (e.g. CI not green yet) must
-        # not fail the run, or the red check would block ff-merge's own gate. It
-        # retries on the next workflow_run.
+        # Best effort: a decline (e.g. CI not green yet) must not fail the run; the
+        # next workflow_run — or the scheduled sweep — retries.
+        if: steps.pr.outputs.number != ''
         continue-on-error: true
         uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
-          pr-number: ${{ github.event.pull_request.number }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          actor: ${{ github.actor }}
+          require-approval: true
+          maintainer-only: false
+          require-label: ${{ inputs.label }}
+
+  sweep-prep:
+    # Scheduled backstop. The event paths (issue_comment, workflow_run, review-ack)
+    # cover every normal case, but a dropped or missed trigger would leave an armed,
+    # eligible PR un-merged with no error. On a schedule, list every open PR carrying
+    # the arm label and hand them to sweep-merge. schedule runs on the default branch
+    # in base context, so the token mint always succeeds. An empty list -> sweep-merge
+    # skips (no empty-matrix error).
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      pulls: ${{ steps.list.outputs.pulls }}
+      any: ${{ steps.list.outputs.any }}
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          # read-only: only lists the open PRs carrying the arm label.
+          permission-pull-requests: read
+
+      - name: List armed open PRs
+        id: list
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          pulls=$(gh pr list --repo "$REPO" --state open --label "$LABEL" \
+            --json number --jq '[.[].number]')
+          echo "pulls=${pulls}" >> "$GITHUB_OUTPUT"
+          if [ "$pulls" = "[]" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No armed open PRs to sweep."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  sweep-merge:
+    # One ff-merge attempt per armed PR. Serialized against every other merge job by
+    # the shared concurrency group (and max-parallel:1) so two ref moves can't race;
+    # fail-fast:false so one PR's decline doesn't cancel the rest of the matrix.
+    needs: sweep-prep
+    if: needs.sweep-prep.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        pr: ${{ fromJSON(needs.sweep-prep.outputs.pulls) }}
+    concurrency:
+      group: ff-merge-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Fast-forward merge
+        # Best effort: ff-merge declines a PR that is not yet approved/green (expected
+        # for one still in flight); the next sweep or an event path retries.
+        continue-on-error: true
+        uses: bitwise-media-group/ff-merge@76046d3da4a351eb1b1225727a3a7d0d178f1dfe # v1.1.0
+        with:
+          token: ${{ steps.app.outputs.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ matrix.pr }}
           actor: ${{ github.actor }}
           require-approval: true
           maintainer-only: false

@@ -1,0 +1,44 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
+# Reusable review-ack — carries the APPROVAL signal for auto-merge. Required companion
+# to merge.yaml. It does no privileged work and needs no secrets; its only job is to
+# COMPLETE on an approving review so that its workflow_run(completed) fires in the
+# base-repo context, where merge.yaml's `merge-on-review-completed` job mints the App
+# token and does the fast-forward.
+#
+# Why it exists: an approval only surfaces as the pull_request_review event, which (a)
+# attaches a skipped-job check to the PR and (b) carries no secrets on a fork. merge.yaml
+# therefore subscribes to no PR-attached events at all — keeping the PR's checks list free
+# of merge clutter — and instead lets this workflow turn the approval into a base-context
+# workflow_run it can act on. That makes fork and same-repo PRs merge identically on
+# approval (including the case where the approval lands after CI is already green, which
+# would otherwise strand a fork PR). ff-merge still re-verifies approval, every check, the
+# arming label, and a genuine fast-forward before moving the ref, so this grants no
+# authority of its own; the completed run is the only thing it contributes, and its single
+# job is the ONLY check this merge system adds to a PR.
+#
+# Called via workflow_call from a thin caller that triggers on
+# pull_request_review(submitted). Only approving reviews ack — a non-approval leaves
+# the job skipped (run conclusion `skipped`), which merge.yaml's handler ignores.
+
+name: Reusable Merge Review Ack
+
+on:
+  workflow_call:
+
+# no privileged work happens here; the completed run is the entire signal
+permissions: {}
+
+jobs:
+  ack:
+    # Only an approval should retry the merge. github.event is the caller's
+    # pull_request_review payload inside a reusable workflow, so gate on the review
+    # state here and keep the caller a bare `uses:`.
+    if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acknowledge the approval
+        run: |
+          echo "Approval recorded. merge.yaml's merge-on-review-completed job will retry"
+          echo "the fast-forward in base context via this run's workflow_run(completed)."
