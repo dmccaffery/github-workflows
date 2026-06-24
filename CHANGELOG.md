@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v2.0.0...v3.0.0) (2026-06-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* consuming repos must update their callers. merge.yaml callers drop the pull_request(labeled) and pull_request_review triggers and add the new required merge-review-ack.yaml companion (kept in the workflow_run list) — without it, approvals no longer trigger auto-merge (only /merge or the scheduled sweep do). dependabot-merge.yaml callers drop the pull_request_target trigger. Hand-adding the auto-merge label no longer attempts a merge immediately; it arms and the merge happens on the next workflow_run or scheduled sweep.
+
+### Features
+
+* **release:** author the release as a GitHub App via optional app-client-id ([19e0245](https://github.com/bitwise-media-group/github-workflows/commit/19e02457091622148360c68e74b40524db2ae248))
+* route auto-merge through events that add no PR checks ([76308d7](https://github.com/bitwise-media-group/github-workflows/commit/76308d717e5a33a8a9d24d0a49f35efd819d3665))
+
 ## [2.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v1.1.0...v2.0.0) (2026-06-21)
 
 
