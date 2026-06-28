@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.0](https://github.com/bitwise-media-group/github-workflows/compare/v3.1.0...v3.2.0) (2026-06-28)
+
+
+### Features
+
+* **ci:** set up uv when a pyproject.toml exists ([53a25ac](https://github.com/bitwise-media-group/github-workflows/commit/53a25ac74013273c0114fe8672a8a2b3588ff0b4))
+* **release:** expose release-please outputs to callers ([e0317e4](https://github.com/bitwise-media-group/github-workflows/commit/e0317e41fa26149ff5026811e9c630863adac495))
+
+
+### Bug Fixes
+
+* **release:** drop ${{ }} braces from a workflow_call output description ([e148d2c](https://github.com/bitwise-media-group/github-workflows/commit/e148d2c0905c23a156f6b361b07f763617576e53))
+
 ## [3.1.0](https://github.com/bitwise-media-group/github-workflows/compare/v3.0.0...v3.1.0) (2026-06-28)
 
 
