@@ -15,7 +15,9 @@
 #   test  -- tests with coverage, emitting coverage/cobertura-coverage.xml (and optionally coverage/junit.xml)
 #   e2e   -- end-to-end tests (only run when the caller sets e2e: true)
 # Stub any not-applicable target as a no-op (e.g. `build: ; @:`) so `make <target>`
-# always succeeds. Coverage is optional -- a repo that emits none still passes.
+# always succeeds. Coverage is optional -- a repo that emits none still passes, and
+# a repo that emits no coverage at all (e.g. the skills library) sets `coverage:
+# false` to skip the Codecov upload job entirely.
 #
 # Runs via workflow_call from a thin caller (examples/ci.yaml) that owns the
 # push/pull_request triggers.
@@ -43,6 +45,11 @@ on:
         description: Run the `make e2e` job. Off by default; e2e often needs services or secrets.
         required: false
         default: false
+        type: boolean
+      coverage:
+        description: Upload coverage and test results to Codecov. Set false for repos that emit neither.
+        required: false
+        default: true
         type: boolean
 
 # granted per job
@@ -103,10 +110,12 @@ jobs:
       - name: Run ${{ matrix.target }}
         run: make ${{ matrix.target }}
 
-      # Coverage is optional: ignore (not error) so prose/no-test repos pass, and
-      # the isolated coverage job below skips the upload when nothing was produced.
+      # Coverage is optional: gated on the `coverage` input (off for repos that
+      # emit none, e.g. the skills library), and even when on, `if-no-files-found:
+      # ignore` keeps a repo that happens to produce nothing from erroring -- the
+      # isolated coverage job below skips the upload when nothing was produced.
       - name: Upload coverage artifact
-        if: matrix.target == 'test'
+        if: ${{ matrix.target == 'test' && inputs.coverage }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
@@ -114,7 +123,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload test results artifact
-        if: matrix.target == 'test'
+        if: ${{ matrix.target == 'test' && inputs.coverage }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results
@@ -126,7 +135,7 @@ jobs:
   # coverage: the downloads may find nothing and each upload is gated on the file.
   coverage:
     needs: make
-    if: ${{ !cancelled() && needs.make.result == 'success' }}
+    if: ${{ !cancelled() && needs.make.result == 'success' && inputs.coverage }}
     runs-on: ubuntu-latest
     permissions:
       # check out the repository

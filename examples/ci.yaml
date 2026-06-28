@@ -36,3 +36,4 @@ jobs:
     #     go.sum
     #     tools/go.sum
     #   e2e: true                 # also run the `make e2e` job (off by default)
+    #   coverage: false           # skip the Codecov upload for repos that emit no coverage/test results
