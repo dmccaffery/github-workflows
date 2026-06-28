@@ -78,13 +78,18 @@ on:
         required: false
     # Surface the release-please result so a caller can add release-only jobs.
     # Every value is an empty string when this run did not cut a release, so gate
-    # with `if: ${{ needs.release.outputs.release_created }}` (where `release` is
-    # the caller's job that `uses:` this workflow).
+    # with `if: needs.release.outputs.release_created` (where `release` is the
+    # caller's job that `uses:` this workflow).
+    #
+    # Keep the `${{ }}` braces OUT of the descriptions below: GitHub evaluates
+    # expressions inside a workflow_call output description, and `needs` is out of
+    # scope there, so a braced example is an "invalid workflow file" at startup.
+    # A job-level `if:` needs no braces anyway.
     outputs:
       release_created:
         description: >-
           "true" when this run cut a release (the release PR merged), empty string otherwise. Use as the gate for
-          follow-on jobs: `if: ${{ needs.release.outputs.release_created }}`.
+          follow-on jobs: `if: needs.release.outputs.release_created`.
         value: ${{ jobs.release-please.outputs.release_created }}
       tag_name:
         description: Git tag of the release just cut (e.g. v1.2.3). Empty string when no release was created.
