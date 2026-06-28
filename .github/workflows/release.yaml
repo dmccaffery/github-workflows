@@ -20,6 +20,12 @@
 # release-please + idempotent tag creation works for both draft (goreleaser) and
 # non-draft releases.
 #
+# Callers can gate follow-on work (docs publish, deploys, notifications) on the
+# workflow_call outputs below: release_created is truthy only when this run cut a
+# release, alongside the tag_name/sha/version/major/minor/patch it produced (all
+# empty otherwise). This lets a caller append a release-only job instead of, e.g.,
+# rebuilding docs on every push to main.
+#
 # The consuming repo provides release-please-config.json + .release-please-manifest.json
 # and a Makefile `build` target (a no-op is fine). Go repos add a .goreleaser.yaml
 # (release-type: go, draft: true); Actions repos commit dist/ and set vanity-tags: true.
@@ -70,6 +76,34 @@ on:
           PAT with write access to the Homebrew tap repository (secrets.HOMEBREW_TAP_GITHUB_TOKEN). Optional; only
           needed if .goreleaser.yaml publishes a cask.
         required: false
+    # Surface the release-please result so a caller can add release-only jobs.
+    # Every value is an empty string when this run did not cut a release, so gate
+    # with `if: ${{ needs.release.outputs.release_created }}` (where `release` is
+    # the caller's job that `uses:` this workflow).
+    outputs:
+      release_created:
+        description: >-
+          "true" when this run cut a release (the release PR merged), empty string otherwise. Use as the gate for
+          follow-on jobs: `if: ${{ needs.release.outputs.release_created }}`.
+        value: ${{ jobs.release-please.outputs.release_created }}
+      tag_name:
+        description: Git tag of the release just cut (e.g. v1.2.3). Empty string when no release was created.
+        value: ${{ jobs.release-please.outputs.tag_name }}
+      sha:
+        description: Commit SHA the release was tagged at. Empty string when no release was created.
+        value: ${{ jobs.release-please.outputs.sha }}
+      version:
+        description: Full semver of the release, no leading v (e.g. 1.2.3). Empty string when no release was created.
+        value: ${{ jobs.release-please.outputs.version }}
+      major:
+        description: Major component of the released version (e.g. 1). Empty string when no release was created.
+        value: ${{ jobs.release-please.outputs.major }}
+      minor:
+        description: Minor component of the released version (e.g. 2). Empty string when no release was created.
+        value: ${{ jobs.release-please.outputs.minor }}
+      patch:
+        description: Patch component of the released version (e.g. 3). Empty string when no release was created.
+        value: ${{ jobs.release-please.outputs.patch }}
 
 # Granted per job below. Note for callers: GitHub validates a reusable workflow's
 # permissions as the union of every job and ignores `if:`, so a caller must grant
@@ -95,6 +129,11 @@ jobs:
       release_created: ${{ steps.release-please.outputs.release_created }}
       tag_name: ${{ steps.release-please.outputs.tag_name }}
       sha: ${{ steps.release-please.outputs.sha }}
+      version: ${{ steps.release-please.outputs.version }}
+      major: ${{ steps.release-please.outputs.major }}
+      minor: ${{ steps.release-please.outputs.minor }}
+      patch: ${{ steps.release-please.outputs.patch }}
+      # internal: truthy hash that picks the goreleaser vs publish job (not a workflow_call output)
       goreleaser: ${{ steps.detect.outputs.goreleaser }}
     steps:
       # checked out so the goreleaser detection below can read the workspace; a
