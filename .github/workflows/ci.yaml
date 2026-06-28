@@ -6,8 +6,10 @@
 # PR-supplied code. Language toolchains are set up only when their marker file is
 # present at the repo root: setup-go when go.mod (a Go product) or go.work (the
 # tools-only addlicense module that `make lint` runs) exists, setup-node when
-# package.json exists (Go repos still use node for the doc linters). The repo's
-# Makefile is the language boundary; this workflow never hard-codes go or npm.
+# package.json exists (Go repos still use node for the doc linters), and setup-uv
+# when pyproject.toml exists -- we standardise on uv for Python, and uv downloads a
+# matching interpreter on demand. The repo's Makefile is the language boundary;
+# this workflow never hard-codes go, npm, or uv.
 #
 # The consuming repo must provide a Makefile with the canonical targets:
 #   lint  -- all check-mode static analysis (prettier --check, markdownlint, go vet, govulncheck, ...)
@@ -106,6 +108,16 @@ jobs:
       - name: Install node packages
         if: hashFiles('package.json')
         run: npm ci
+
+      # uv is our Python toolchain -- gate on pyproject.toml (every uv project has
+      # one). uv reads requires-python / .python-version and downloads a matching
+      # interpreter on demand when the Makefile runs `uv run` / `uv sync`; the cache
+      # is keyed on the lockfiles. No setup-python: we standardise on uv.
+      - name: Setup uv
+        if: hashFiles('pyproject.toml')
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
 
       - name: Run ${{ matrix.target }}
         run: make ${{ matrix.target }}
@@ -207,6 +219,12 @@ jobs:
       - name: Install node packages
         if: hashFiles('package.json')
         run: npm ci
+
+      - name: Setup uv
+        if: hashFiles('pyproject.toml')
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
 
       - name: Run e2e
         run: make e2e

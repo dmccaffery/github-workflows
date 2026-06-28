@@ -5,7 +5,7 @@
 # push/pull_request triggers; all the work lives in the reusable ci workflow,
 # which runs the canonical Makefile gates (lint, build, test) as one job each and
 # sets up only the toolchains the repo has (a root go.mod -> go, package.json ->
-# node).
+# node, pyproject.toml -> uv).
 #
 # The repo must provide a Makefile with targets lint / build / test (test emitting
 # coverage/cobertura-coverage.xml, optionally coverage/junit.xml) and -- if you
