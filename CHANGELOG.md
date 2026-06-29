@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.2](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.1...v4.0.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **merge:** grant statuses:read for the legacy commit-status rollup ([3bbf3b3](https://github.com/bitwise-media-group/github-workflows/commit/3bbf3b31dda983239599531dd850f224faa7706b))
+
 ## [4.0.1](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.0...v4.0.1) (2026-06-29)
 
 
