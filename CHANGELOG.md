@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.1](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.0...v4.0.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **merge:** grant checks:read so ff-merge can read the check-run rollup ([5a651ab](https://github.com/bitwise-media-group/github-workflows/commit/5a651ab63596ff9223d4a9be753096989f7912bc))
+
 ## [4.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v3.2.1...v4.0.0) (2026-06-29)
 
 
