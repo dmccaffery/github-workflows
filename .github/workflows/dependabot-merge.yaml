@@ -15,13 +15,15 @@
 #   1. resolves the open PR for the branch and confirms Dependabot authored it;
 #   2. reads the SEMVER POLICY straight from the PR head commit. dependabot/fetch-metadata
 #      cannot run here — it reads the PR from a pull_request(_target) event payload, which
-#      a workflow_run does not have — so the update type is taken from the trailer
-#      Dependabot writes into its own commit message (`update-type: version-update:semver-*`).
-#      That trailer is only trustworthy if the commit really is Dependabot's, so the job
-#      first verifies the head commit is authored by dependabot[bot] AND carries a valid
+#      a workflow_run does not have — so the update type comes from the head commit message:
+#      the `update-type: version-update:semver-*` trailer Dependabot writes for DIRECT deps,
+#      and — for INDIRECT deps, which carry a `dependency-version:` but no `update-type:` —
+#      the major/minor/patch delta computed from the `from <old> to <new>` versions in the
+#      message. That message is only trustworthy if the commit really is Dependabot's, so the
+#      job first verifies the head commit is authored by dependabot[bot] AND carries a valid
 #      signature (the same checks fetch-metadata makes by default). It then refuses unless
-#      EVERY semver token found in the message is within `update-types` — so a tampered or
-#      grouped commit that hides a major is not approved;
+#      EVERY level found in the message is within `update-types` — so a tampered or grouped
+#      commit that hides a major is not approved;
 #   3. approves the PR (App token) when, and only when, the update is in policy;
 #   4. fast-forwards. The merge runs whenever an approval exists (ff-merge
 #      require-approval: true) — the bot's for in-policy updates, or a human's for anything
@@ -107,10 +109,12 @@ jobs:
 
           # workflow_run carries the branch, not the PR. Find the open PR for it and
           # confirm Dependabot authored it (a human cannot open a PR as dependabot[bot],
-          # so an author match means it is genuinely a Dependabot PR).
+          # so an author match means it is genuinely a Dependabot PR). gh reports the bot
+          # author from its GraphQL backing as `app/dependabot`, while the REST commit check
+          # below sees the classic `dependabot[bot]`; accept either spelling of the bot here.
           read -r number sha < <(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
             --json number,author,headRefOid \
-            --jq 'map(select(.author.login == "dependabot[bot]")) | .[0] | "\(.number // "") \(.headRefOid // "")"')
+            --jq 'map(select(.author.is_bot and (.author.login == "dependabot[bot]" or .author.login == "app/dependabot"))) | .[0] | "\(.number // "") \(.headRefOid // "")"')
           echo "number=${number}" >> "$GITHUB_OUTPUT"
           if [ -z "$number" ]; then
             echo "No open Dependabot PR for ${BRANCH}; nothing to do."
@@ -133,19 +137,58 @@ jobs:
             exit 0
           fi
 
-          # Collect EVERY semver token in the message (grouped updates list several), not
-          # just well-formed trailer lines, so a major hidden anywhere is still caught.
+          # Build the set of semver levels this update applies, then approve only if EVERY
+          # one is in policy — so a major hidden anywhere (a grouped commit, an unparsable
+          # version) leaves the PR for a human. The default is to refuse, never to approve.
+          approve=true
+
+          # (a) Explicit `update-type: version-update:semver-*` trailers. Dependabot writes
+          # these for DIRECT deps, and a grouped update lists one per dependency.
           types=$(printf '%s\n' "$message" | grep -oE 'version-update:semver-[a-z]+' | sort -u || true)
+
+          # (b) INDIRECT (transitive) deps carry a `dependency-version:` trailer but NO
+          # `update-type:`, so (a) finds nothing for them. Derive the level from each
+          # Dependabot "from <old> to <new>" line instead (anchored to the `Bumps`/`Updates`
+          # lines so changelog prose cannot inject a spurious transition). A version that
+          # does not parse into numeric major.minor.patch is treated as out of policy rather
+          # than assumed safe.
+          transitions=$(printf '%s\n' "$message" \
+            | grep -E '^(Bumps|Updates) ' \
+            | grep -oE 'from [0-9][0-9A-Za-z.+-]* to [0-9][0-9A-Za-z.+-]*' \
+            || true)
+          while IFS= read -r pair; do
+            [ -n "$pair" ] || continue
+            rest=${pair#from }
+            old=${rest%% to *}; old=${old%.}; old=${old#v}
+            new=${rest##* to }; new=${new%.}; new=${new#v}
+            IFS=. read -r oM om op _ <<<"${old%%[-+]*}"
+            IFS=. read -r nM nm np _ <<<"${new%%[-+]*}"
+            oM=${oM:-0}; om=${om:-0}; op=${op:-0}
+            nM=${nM:-0}; nm=${nm:-0}; np=${np:-0}
+            case "$oM$om$op$nM$nm$np" in
+              ''|*[!0-9]*)
+                echo "Cannot classify version change ${old} -> ${new} in ${sha}; not approving."
+                approve=false
+                continue
+                ;;
+            esac
+            if [ "$oM" != "$nM" ]; then lvl=major
+            elif [ "$om" != "$nm" ]; then lvl=minor
+            else lvl=patch
+            fi
+            types=$(printf '%s\nversion-update:semver-%s' "$types" "$lvl")
+          done <<<"$transitions"
+          types=$(printf '%s\n' "$types" | grep -vE '^[[:space:]]*$' | sort -u || true)
+
           if [ -z "$types" ]; then
-            echo "No Dependabot update-type metadata in commit ${sha}; not approving."
+            echo "No update-type metadata or parsable version change in commit ${sha}; not approving."
             echo "approve=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Approve only if every update type is within policy. Any out-of-policy bump
-          # (e.g. a major) leaves the PR for a human. Each token is whitespace-free, so
-          # word-splitting $types is safe and keeps the loop in this shell.
-          approve=true
+          # Any out-of-policy bump (e.g. a major) flips approve to false and leaves the PR
+          # for a human. Each token is whitespace-free, so word-splitting $types is safe and
+          # keeps the loop in this shell.
           for t in $types; do
             if ! printf '%s' "$UPDATE_TYPES" | jq -e --arg t "$t" 'index($t) != null' >/dev/null; then
               echo "Update type ${t} is not in policy; not approving."
