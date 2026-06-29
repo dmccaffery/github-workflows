@@ -13,15 +13,15 @@ Copy a caller from [`examples/`](examples/) into your repo's `.github/workflows/
 All reusable workflows live in [`.github/workflows/`](.github/workflows/) and are `workflow_call`-only. Every external
 action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 
-| Workflow                                         | Platform | What it does                                                                                                            |
-| ------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| [`ci.yaml`](#ciyaml)                             | any      | canonical Makefile gates (lint/build/test) per job, committed `dist/` verified, toolchains by detection, Codecov upload |
-| [`security.yaml`](#securityyaml)                 | any      | CodeQL over actions + go (autobuild) + javascript-typescript, language matrix by detection                              |
-| [`release.yaml`](#releaseyaml)                   | any      | release-please (two-pass) → GoReleaser (if `.goreleaser.yaml`); optional floating `v1`/`v1.1` vanity tags               |
-| [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward merge — `/merge` now, or `/auto-merge` (comment/label) when approved + green          |
-| [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                           |
-| [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                                     |
-| [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                        |
+| Workflow                                         | Platform | What it does                                                                                                              |
+| ------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
+| [`ci.yaml`](#ciyaml)                             | any      | canonical Makefile gates (lint/build/test) per job, committed `dist/` verified, toolchains by detection, Codecov upload   |
+| [`security.yaml`](#securityyaml)                 | any      | CodeQL over actions + go (autobuild) + javascript-typescript, language matrix by detection                                |
+| [`release.yaml`](#releaseyaml)                   | any      | release-please (two-pass) → GoReleaser (if `.goreleaser.yaml`) + Zensical docs to Pages (if `zensical.toml`); vanity tags |
+| [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward merge — `/merge` now, or `/auto-merge` (comment/label) when approved + green            |
+| [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                             |
+| [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                                       |
+| [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                          |
 
 Each workflow below lists its inputs, secrets, and the permission ceiling the **caller** must grant — a reusable
 workflow's jobs cannot exceed the permissions of the job that calls them. The snippet is the minimal caller; follow the
@@ -92,8 +92,11 @@ Full example: [`examples/security.yaml`](examples/security.yaml).
 
 _Any repo._ Runs release-please (two-pass), then branches by detection: a repo with a `.goreleaser.yaml` runs GoReleaser
 (archives, checksums, SBOMs, cosign signatures, optional Homebrew cask, SLSA attestation); every other repo's release is
-just the release-please cut. With `vanity-tags: true` it also moves the floating major and minor tags (`v1` and `v1.1`).
-A committed `dist/` is verified for freshness in [`ci.yaml`](#ciyaml) on every PR, not at release time.
+just the release-please cut. A repo with a `zensical.toml` also rebuilds its Zensical docs site
+(`uv run zensical build`) and publishes it to GitHub Pages — gated on an actual release and keyed off config presence
+exactly like the GoReleaser path, so it is independent of GoReleaser (a repo can ship binaries and docs from one
+release). With `vanity-tags: true` it also moves the floating major and minor tags (`v1` and `v1.1`). A committed
+`dist/` is verified for freshness in [`ci.yaml`](#ciyaml) on every PR, not at release time.
 
 - **Inputs:** `go-version-file` (default `go.mod`), `vanity-tags` (default `false`; move the floating `v1` / `v1.1` tags
   — set it for Actions/reusable repos whose consumers pin `@v1`), `app-client-id` (optional; author the release as a
@@ -106,10 +109,15 @@ A committed `dist/` is verified for freshness in [`ci.yaml`](#ciyaml) on every P
   `workflow_run` events — GitHub's recursion guard suppresses them — so [`merge.yaml`](#mergeyaml)'s auto-merge, which
   is keyed on `workflow_run`, never retriggers when its checks go green and the PR only lands on the hourly sweep.
   Authoring as the App restores the trigger. Skip both inputs if you don't auto-merge release PRs.
+- **Publishing docs:** add a `zensical.toml` (plus `pyproject.toml` + `uv.lock`) at the repo root and set **Settings →
+  Pages → Source → GitHub Actions**. On each release the `docs` job runs `uv run zensical build` and deploys `./site` to
+  Pages. It renders `docs/` only — no language build — so a repo whose docs embed generated reference (e.g. a CLI/man
+  dump) must commit that output. Nothing to configure beyond the file and the Pages source.
 - **Permissions (caller grants):** `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write`,
-  `attestations: write`, `artifact-metadata: write`. Grant all six even without a `.goreleaser.yaml`: GitHub resolves a
-  reusable workflow's permissions as the union of every job and ignores `if:`, so the skipped GoReleaser job's
-  `id-token` / `attestations` / `artifact-metadata` are still required or the run fails at startup.
+  `attestations: write`, `artifact-metadata: write`, `pages: write`. Grant all seven even without a `.goreleaser.yaml`
+  or `zensical.toml`: GitHub resolves a reusable workflow's permissions as the union of every job and ignores `if:`, so
+  the skipped GoReleaser job's `id-token` / `attestations` / `artifact-metadata` and the docs job's `pages` are still
+  required or the run fails at startup.
 
 ```yaml
 on:
@@ -119,9 +127,10 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  id-token: write # cosign keyless signing
+  id-token: write # cosign keyless signing + docs Pages OIDC deploy
   attestations: write # github build-provenance attestation
   artifact-metadata: write # artifact storage record for the attestation
+  pages: write # publish docs to GitHub Pages (when a zensical.toml exists)
 jobs:
   release:
     uses: bitwise-media-group/github-workflows/.github/workflows/release.yaml@v2
@@ -297,8 +306,9 @@ toolchains from the files at the repo root:
   to exclude it.
 - **Release** — `release-please-config.json` + `.release-please-manifest.json`; a `.goreleaser.yaml`
   (`release-type: go`, `draft: true`) selects the GoReleaser path, otherwise the release is just the release-please cut.
-  Set `vanity-tags: true` to move the floating `v1` / `v1.1` tags (after GoReleaser when present); a committed `dist/`
-  is verified in CI, not here.
+  A `zensical.toml` selects the docs path (rebuild the Zensical site and publish to Pages; needs Pages set to GitHub
+  Actions and `pages: write`). Set `vanity-tags: true` to move the floating `v1` / `v1.1` tags (after GoReleaser when
+  present); a committed `dist/` is verified in CI, not here.
 
 A caller may mix a reusable-workflow job with normal jobs — e.g. a Go CLI keeps its product-specific `integration` /
 `e2e` jobs in the same `ci.yaml` that calls the reusable `ci.yaml`.

@@ -9,6 +9,12 @@
 #     archives + checksums + SBOMs + keyless cosign signatures, an optional
 #     Homebrew cask, and a GitHub build-provenance attestation over checksums.txt,
 #     then adopts and publishes the draft release.
+#   - A repo with a zensical.toml takes the `docs` job: it rebuilds the Zensical
+#     site (uv run zensical build) and publishes it to GitHub Pages. This is keyed
+#     off the same config-presence detection as the goreleaser path and is
+#     independent of it, so a repo can ship binaries AND publish docs from one
+#     release. Callers must grant `pages: write` for it (see the permissions note
+#     below); the consuming repo must also set Settings -> Pages -> GitHub Actions.
 #   - Every other repo's release is just the release-please cut. A committed dist/
 #     is verified for freshness in CI (reusable ci.yaml), not here.
 #
@@ -32,6 +38,8 @@
 # The consuming repo provides release-please-config.json + .release-please-manifest.json.
 # Go repos add a .goreleaser.yaml (release-type: go, draft: true); Actions repos that
 # commit dist/ set vanity-tags: true so their @v1/@v1.1 consumers track each release.
+# Repos that publish docs add a zensical.toml plus pyproject.toml + uv.lock at the
+# repo root (the docs job renders docs/ with `uv run zensical build`).
 #
 # Runs via workflow_call from a thin caller (examples/release.yaml) that owns the
 # push trigger and grants the release permissions.
@@ -110,8 +118,9 @@ on:
 
 # Granted per job below. Note for callers: GitHub validates a reusable workflow's
 # permissions as the union of every job and ignores `if:`, so a caller must grant
-# the goreleaser job's id-token/attestations/artifact-metadata even on the non-Go
-# path where that job is skipped -- see examples/release.yaml.
+# the goreleaser job's id-token/attestations/artifact-metadata and the docs job's
+# pages:write even on the paths where those jobs are skipped -- see
+# examples/release.yaml.
 permissions: {}
 
 # concurrent release-please runs can open duplicate release PRs; queue them.
@@ -136,8 +145,9 @@ jobs:
       major: ${{ steps.release-please.outputs.major }}
       minor: ${{ steps.release-please.outputs.minor }}
       patch: ${{ steps.release-please.outputs.patch }}
-      # internal: truthy hash that picks the goreleaser vs publish job (not a workflow_call output)
+      # internal: truthy hashes that pick the goreleaser/publish path and gate the docs job (not workflow_call outputs)
       goreleaser: ${{ steps.detect.outputs.goreleaser }}
+      zensical: ${{ steps.detect.outputs.zensical }}
     steps:
       # checked out so the goreleaser detection below can read the workspace; a
       # job-level `if:` on the downstream jobs runs before their checkout and
@@ -169,11 +179,17 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      # The goreleaser output is the config-file hash (empty when absent), used
-      # downstream as a truthy flag to pick the goreleaser vs publish job.
-      - name: Detect goreleaser config
+      # Each output is a config-file hash (empty when the file is absent), used
+      # downstream as a truthy flag: goreleaser picks the goreleaser vs publish job;
+      # zensical gates the docs job. hashFiles returns a fixed-format hash, never
+      # caller-controlled text, so interpolating it into the run script is injection-safe.
+      - name: Detect goreleaser and zensical config
         id: detect
-        run: echo "goreleaser=${{ hashFiles('.goreleaser.yaml', '.goreleaser.yml') }}" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "goreleaser=${{ hashFiles('.goreleaser.yaml', '.goreleaser.yml') }}"
+            echo "zensical=${{ hashFiles('zensical.toml') }}"
+          } >> "$GITHUB_OUTPUT"
 
       # First pass cuts the release only; the release PR is built in a second pass
       # below, once the tag exists.
@@ -272,6 +288,72 @@ jobs:
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
         with:
           subject-checksums: ./dist/checksums.txt
+
+  # Build the Zensical documentation site and publish it to GitHub Pages -- the
+  # zensical.toml counterpart to the goreleaser path. It only needs release-please
+  # (not goreleaser), so on a repo that both ships binaries and publishes docs the
+  # two run in parallel; on a docs-only repo goreleaser is skipped and this runs
+  # straight off release-please.
+  #
+  # `uv run zensical build` re-renders docs/ into ./site with no language build: a
+  # repo whose docs embed generated reference (e.g. a committed CLI/man dump) ships
+  # that output, so this needs no toolchain beyond uv (it reads uv.lock +
+  # .python-version and provisions the interpreter on demand). The consuming repo
+  # must set Settings -> Pages -> Source -> GitHub Actions for the deploy to land.
+  #
+  # Same trusted-trigger allowlist as goreleaser: this checks out a computed ref and
+  # runs the repo's locked deps, so it is gated to vetted events and fails closed on
+  # any other (defense in depth for a reusable workflow that cannot see its caller's
+  # trigger).
+  docs:
+    needs: release-please
+    if: >-
+      needs.release-please.outputs.release_created && needs.release-please.outputs.zensical &&
+      contains(fromJSON('["push","workflow_dispatch","schedule"]'), github.event_name)
+    runs-on: ubuntu-latest
+    permissions:
+      # check out the source to build the site
+      contents: read
+      # publish the GitHub Pages deployment
+      pages: write
+      # OIDC token the deploy-pages action exchanges for the Pages deploy
+      id-token: write
+    # serialize Pages deployments; never cancel an in-flight publish
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout repository at release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # build the exact commit the release was tagged at
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false # read-only checkout; don't leave the token in .git/config
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+
+      # uv run resolves the locked deps (uv.lock) and the .python-version toolchain
+      # on demand, then Zensical renders docs/ into ./site.
+      - name: Build site
+        run: uv run zensical build
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
 
   # Move the floating major/minor tags (v1, v1.1) that consumers pin onto the new
   # release commit -- one implementation shared by both paths, ordered last. It
