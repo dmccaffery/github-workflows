@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v3.2.1...v4.0.0) (2026-06-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* callers must now grant `pages: write`. GitHub resolves a reusable workflow's permissions as the union of every job and ignores `if:`, so the docs job's pages:write is required even on repos without a zensical.toml or the run fails at startup. Add `pages: write` to the caller's permissions block (see examples/release.yaml). Consuming repos should also delete their inline docs job and set Settings -> Pages -> Source -> GitHub Actions.
+
+### Features
+
+* build and publish Zensical docs to Pages on release ([c619e32](https://github.com/bitwise-media-group/github-workflows/commit/c619e322bed4f2cdd65687dc9b29a8ae06b2f9a0))
+
 ## [3.2.1](https://github.com/bitwise-media-group/github-workflows/compare/v3.2.0...v3.2.1) (2026-06-29)
 
 
