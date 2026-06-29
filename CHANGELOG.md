@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.3](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.2...v4.0.3) (2026-06-29)
+
+
+### Bug Fixes
+
+* make Dependabot auto-merge match modern gh and indirect deps ([1e7e5d8](https://github.com/bitwise-media-group/github-workflows/commit/1e7e5d8fd1e7d99b90e51b72ced0362590ca9171))
+
 ## [4.0.2](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.1...v4.0.2) (2026-06-29)
 
 
