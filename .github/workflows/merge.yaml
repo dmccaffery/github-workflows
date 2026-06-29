@@ -119,14 +119,16 @@ jobs:
           # Least-privilege within the App's installation ceiling: ff-merge moves the
           # base ref (contents), reads/comments on the PR (pull-requests), resolves
           # the actor's access level for maintainer-only (administration), closes the
-          # PR's linked issues (issues), and moves a ref whose commits touch
+          # PR's linked issues (issues), moves a ref whose commits touch
           # .github/workflows/ files (workflows — GitHub rejects any ref update that
-          # adds or edits a workflow file without it).
+          # adds or edits a workflow file without it), and reads the head commit's
+          # check-run rollup to confirm every required check is green (checks).
           permission-contents: write
           permission-pull-requests: write
           permission-administration: read
           permission-workflows: write
           permission-issues: write
+          permission-checks: read
 
       - name: Fast-forward merge
         uses: bitwise-media-group/ff-merge@261714459a53c43ba032fe0e3a3e6f3ab8fd14de # v1.2.0
@@ -165,12 +167,14 @@ jobs:
           private-key: ${{ secrets.app-private-key }}
           # Labels and comments on the PR (pull-requests), closes the PR's linked
           # issues (issues), and moves the ref via the best-effort ff-merge (contents),
-          # which also needs workflows when the merge touches .github/workflows/ files;
-          # maintainer-only:false here, so no administration scope is needed.
+          # which also needs workflows when the merge touches .github/workflows/ files
+          # and checks to read the head commit's check-run rollup; maintainer-only:false
+          # here, so no administration scope is needed.
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
           permission-issues: write
+          permission-checks: read
 
       - name: Ensure the auto-merge label is present
         env:
@@ -241,13 +245,15 @@ jobs:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
           # ff-merge moves the ref (contents), reads the PR (pull-requests), closes the
-          # PR's linked issues (issues), and needs workflows to move a ref whose commits
-          # touch .github/workflows/ files; maintainer-only:false here, so no
-          # administration scope is needed.
+          # PR's linked issues (issues), reads the head commit's check-run rollup
+          # (checks), and needs workflows to move a ref whose commits touch
+          # .github/workflows/ files; maintainer-only:false here, so no administration
+          # scope is needed.
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
           permission-issues: write
+          permission-checks: read
 
       - name: Resolve the open PR for this branch
         id: pr
@@ -311,13 +317,15 @@ jobs:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
           # ff-merge moves the ref (contents), reads the PR (pull-requests), closes the
-          # PR's linked issues (issues), and needs workflows to move a ref whose commits
-          # touch .github/workflows/ files; maintainer-only:false here, so no
-          # administration scope is needed.
+          # PR's linked issues (issues), reads the head commit's check-run rollup
+          # (checks), and needs workflows to move a ref whose commits touch
+          # .github/workflows/ files; maintainer-only:false here, so no administration
+          # scope is needed.
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
           permission-issues: write
+          permission-checks: read
 
       - name: Resolve the open PR for this branch
         id: pr
@@ -416,11 +424,13 @@ jobs:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
           # ff-merge closes the PR's linked issues (issues) on a successful sweep merge,
-          # alongside the ref move (contents) and the workflow-file allowance (workflows).
+          # alongside the ref move (contents), the workflow-file allowance (workflows),
+          # and reading the head commit's check-run rollup (checks).
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
           permission-issues: write
+          permission-checks: read
 
       - name: Fast-forward merge
         # Best effort: ff-merge declines a PR that is not yet approved/green (expected
