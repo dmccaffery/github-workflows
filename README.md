@@ -13,15 +13,15 @@ Copy a caller from [`examples/`](examples/) into your repo's `.github/workflows/
 All reusable workflows live in [`.github/workflows/`](.github/workflows/) and are `workflow_call`-only. Every external
 action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 
-| Workflow                                         | Platform | What it does                                                                                                     |
-| ------------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------- |
-| [`ci.yaml`](#ciyaml)                             | any      | canonical Makefile gates (lint/build/test) per job, toolchains by detection, Codecov upload                      |
-| [`security.yaml`](#securityyaml)                 | any      | CodeQL over actions + go (autobuild) + javascript-typescript, language matrix by detection                       |
-| [`release.yaml`](#releaseyaml)                   | any      | release-please (two-pass) → GoReleaser (if `.goreleaser.yaml`) or `dist/` rebuild + verify; optional vanity tags |
-| [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward merge — `/merge` now, or `/auto-merge` (comment/label) when approved + green   |
-| [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                    |
-| [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                              |
-| [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                 |
+| Workflow                                         | Platform | What it does                                                                                                            |
+| ------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| [`ci.yaml`](#ciyaml)                             | any      | canonical Makefile gates (lint/build/test) per job, committed `dist/` verified, toolchains by detection, Codecov upload |
+| [`security.yaml`](#securityyaml)                 | any      | CodeQL over actions + go (autobuild) + javascript-typescript, language matrix by detection                              |
+| [`release.yaml`](#releaseyaml)                   | any      | release-please (two-pass) → GoReleaser (if `.goreleaser.yaml`); optional floating `v1`/`v1.1` vanity tags               |
+| [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward merge — `/merge` now, or `/auto-merge` (comment/label) when approved + green          |
+| [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                           |
+| [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                                     |
+| [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                        |
 
 Each workflow below lists its inputs, secrets, and the permission ceiling the **caller** must grant — a reusable
 workflow's jobs cannot exceed the permissions of the job that calls them. The snippet is the minimal caller; follow the
@@ -31,8 +31,9 @@ link beneath it for the fully-commented version.
 
 _Any repo._ Runs the canonical Makefile gates — `lint`, `build`, `test` — as one parallel job each, sets up only the
 toolchains the repo has (a root `go.mod` → Go, `package.json` → Node), and uploads coverage to Codecov from a job
-isolated from PR-built code. An opt-in `e2e` job runs `make e2e`. A caller may add product-specific jobs (e.g.
-`integration`) alongside the `ci` job.
+isolated from PR-built code. A repo that commits its build output has its `dist/` verified up to date after `make build`
+(so a stale committed artifact fails the PR). An opt-in `e2e` job runs `make e2e`. A caller may add product-specific
+jobs (e.g. `integration`) alongside the `ci` job.
 
 - **Inputs:** `go-version-file` (default `go.mod`), `node-version-file` (default `.node-version`),
   `cache-dependency-path` (default `go.sum`; newline-separated lockfiles to key the module cache on), `e2e` (default
@@ -90,13 +91,13 @@ Full example: [`examples/security.yaml`](examples/security.yaml).
 ### `release.yaml`
 
 _Any repo._ Runs release-please (two-pass), then branches by detection: a repo with a `.goreleaser.yaml` runs GoReleaser
-(archives, checksums, SBOMs, cosign signatures, optional Homebrew cask, SLSA attestation); every other repo rebuilds via
-`make build` and verifies a committed `dist/`. With `vanity-tags: true` it also moves the floating major and minor tags
-(`v1` and `v1.1`).
+(archives, checksums, SBOMs, cosign signatures, optional Homebrew cask, SLSA attestation); every other repo's release is
+just the release-please cut. With `vanity-tags: true` it also moves the floating major and minor tags (`v1` and `v1.1`).
+A committed `dist/` is verified for freshness in [`ci.yaml`](#ciyaml) on every PR, not at release time.
 
-- **Inputs:** `go-version-file` (default `go.mod`), `node-version-file` (default `.node-version`), `vanity-tags`
-  (default `false`; move the floating `v1` / `v1.1` tags — set it for Actions/reusable repos whose consumers pin `@v1`),
-  `app-client-id` (optional; author the release as a GitHub App rather than `GITHUB_TOKEN` — `vars.FF_MERGE_CLIENT_ID`).
+- **Inputs:** `go-version-file` (default `go.mod`), `vanity-tags` (default `false`; move the floating `v1` / `v1.1` tags
+  — set it for Actions/reusable repos whose consumers pin `@v1`), `app-client-id` (optional; author the release as a
+  GitHub App rather than `GITHUB_TOKEN` — `vars.FF_MERGE_CLIENT_ID`).
 - **Secrets:** `homebrew-tap-token` — optional; only needed if `.goreleaser.yaml` publishes a Homebrew cask to another
   repo (`secrets.HOMEBREW_TAP_GITHUB_TOKEN`). `app-private-key` — optional; required only when `app-client-id` is set
   (`secrets.FF_MERGE_PRIVATE_KEY`).
@@ -286,16 +287,18 @@ toolchains from the files at the repo root:
 - **Makefile targets** — `lint` (all check-mode static analysis: `prettier --check`, markdownlint, and for Go `go vet` /
   `govulncheck`), `build`, `test` (emitting `coverage/cobertura-coverage.xml`, optionally `coverage/junit.xml`), and
   `e2e`. Stub any that don't apply as a no-op (`build: ; @:`) so `make <target>` always succeeds; coverage is optional.
-- **Toolchain detection** — `setup-go` runs only when a **root `go.mod`** exists; `setup-node` (and `npm ci`) only when
-  `package.json` exists. A tools-only `go.work` + `tools/go.mod` (for `go tool addlicense`) is universal dev tooling, so
-  it is **not** a Go-product signal — only a root `go.mod` is.
+- **Toolchain detection** — `setup-go` runs only when a **root `go.mod`** exists; `setup-node` only when `package.json`
+  exists (the `make` targets install their own deps, so the workflow sets up the toolchain but does not run `npm ci`). A
+  tools-only `go.work` + `tools/go.mod` (for `go tool addlicense`) is universal dev tooling, so it is **not** a
+  Go-product signal — only a root `go.mod` is.
 - **CodeQL** — scans `actions` always, `go` (autobuild, `setup-go` from `go-version-file`) when a root `go.mod` exists,
   and `javascript-typescript` when `package.json` exists. A repo with a bundled `dist/` should pass
   `config-file: ./.github/codeql/codeql-config.yaml` (copy [`examples/codeql-config.yaml`](examples/codeql-config.yaml))
   to exclude it.
 - **Release** — `release-please-config.json` + `.release-please-manifest.json`; a `.goreleaser.yaml`
-  (`release-type: go`, `draft: true`) selects the GoReleaser path, otherwise the publish path rebuilds via `make build`
-  and verifies a committed `dist/`. Set `vanity-tags: true` to move the floating `v1` / `v1.1` tags.
+  (`release-type: go`, `draft: true`) selects the GoReleaser path, otherwise the release is just the release-please cut.
+  Set `vanity-tags: true` to move the floating `v1` / `v1.1` tags (after GoReleaser when present); a committed `dist/`
+  is verified in CI, not here.
 
 A caller may mix a reusable-workflow job with normal jobs — e.g. a Go CLI keeps its product-specific `integration` /
 `e2e` jobs in the same `ci.yaml` that calls the reusable `ci.yaml`.
@@ -321,14 +324,14 @@ its ruleset bypass, and the `FF_MERGE_CLIENT_ID` variable + `FF_MERGE_PRIVATE_KE
 ## Testing changes
 
 This repo dogfoods its own reusable workflows by local path: `self-ci.yaml` calls `ci.yaml` (which detects node only —
-there is no root `go.mod` — and runs the canonical `make` gates) and `self-release.yaml` calls `release.yaml` (the
-publish path, moving the vanity tags). `self-security.yaml` stays a bespoke `actions`-only scan: the library has no
-compilable Go and no JS/TS product source, so the reusable `security.yaml` would add an empty `javascript-typescript`
-leg from its tooling-only `package.json`. The `/merge` + auto-merge flows (`self-merge.yaml`), its fork-PR review-ack
-companion (`self-merge-review-ack.yaml`), the merge notice (`self-merge-notice.yaml`), and Dependabot auto-merge
-(`self-dependabot-merge.yaml`, which keeps the reusable workflows' action pins fresh) dogfood the rest. Validate a
-change to a reusable workflow by temporarily pointing a real consumer's caller at a feature branch or SHA
-(`@your-branch`) and opening a PR there.
+there is no root `go.mod` — and runs the canonical `make` gates) and `self-release.yaml` calls `release.yaml` (no
+`.goreleaser.yaml`, so just the release-please cut plus the `vanity-tags` job). `self-security.yaml` stays a bespoke
+`actions`-only scan: the library has no compilable Go and no JS/TS product source, so the reusable `security.yaml` would
+add an empty `javascript-typescript` leg from its tooling-only `package.json`. The `/merge` + auto-merge flows
+(`self-merge.yaml`), its fork-PR review-ack companion (`self-merge-review-ack.yaml`), the merge notice
+(`self-merge-notice.yaml`), and Dependabot auto-merge (`self-dependabot-merge.yaml`, which keeps the reusable workflows'
+action pins fresh) dogfood the rest. Validate a change to a reusable workflow by temporarily pointing a real consumer's
+caller at a feature branch or SHA (`@your-branch`) and opening a PR there.
 
 ## Releasing this repo
 
