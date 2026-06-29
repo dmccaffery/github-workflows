@@ -85,13 +85,15 @@ jobs:
           private-key: ${{ secrets.app-private-key }}
           # ff-merge moves the ref (contents) and reads/approves the PR (pull-requests),
           # needs workflows to move a ref whose commits touch .github/workflows/ files,
-          # and reads the head commit's check-run rollup (checks); the approval
-          # (minor/patch only) is the authorization gate, not maintainer-only, so no
-          # administration scope is needed.
+          # and reads the head commit's status rollup — Checks-API check runs (checks)
+          # plus legacy commit statuses (statuses); the approval (minor/patch only) is
+          # the authorization gate, not maintainer-only, so no administration scope is
+          # needed.
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
           permission-checks: read
+          permission-statuses: read
 
       - name: Resolve the Dependabot PR and assess the update policy
         id: assess
