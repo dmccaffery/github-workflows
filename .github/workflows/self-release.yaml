@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 # This repo's own release, dogfooding the reusable release workflow by local path.
-# With no .goreleaser.yaml it takes the publish branch: release-please cuts the
-# release (release-type: simple), `make build` is a no-op, and vanity-tags moves
-# the floating v1 / v1.1 tags that consumers of these reusable workflows pin.
+# With no .goreleaser.yaml it takes the non-Go path: release-please cuts the release
+# (release-type: simple), then -- because vanity-tags is true -- the vanity-tags job
+# moves the floating v1 / v1.1 tags that consumers of these reusable workflows pin.
 name: Release
 
 on:

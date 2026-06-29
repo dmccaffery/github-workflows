@@ -9,11 +9,14 @@
 #     archives + checksums + SBOMs + keyless cosign signatures, an optional
 #     Homebrew cask, and a GitHub build-provenance attestation over checksums.txt,
 #     then adopts and publishes the draft release.
-#   - Every other repo takes the `publish` job: it rebuilds via `make build` and
-#     verifies a committed dist/ reproduces from source.
+#   - Every other repo's release is just the release-please cut. A committed dist/
+#     is verified for freshness in CI (reusable ci.yaml), not here.
 #
-# Either job, when the caller sets vanity-tags: true, moves the floating major and
-# minor tags (v1 and v1.1) that consumers pin.
+# A final vanity-tags job, when the caller sets vanity-tags: true, moves the
+# floating major and minor tags (v1 and v1.1) that consumers pin -- it needs the
+# goreleaser job, so on the Go path the tags advance only after that job has
+# published the release, and on every other path (goreleaser skipped) it runs
+# straight after release-please.
 #
 # Detection is a single hashFiles output on the release-please job, because a
 # job-level `if:` runs before checkout and can't see the workspace. The two-pass
@@ -26,9 +29,9 @@
 # empty otherwise). This lets a caller append a release-only job instead of, e.g.,
 # rebuilding docs on every push to main.
 #
-# The consuming repo provides release-please-config.json + .release-please-manifest.json
-# and a Makefile `build` target (a no-op is fine). Go repos add a .goreleaser.yaml
-# (release-type: go, draft: true); Actions repos commit dist/ and set vanity-tags: true.
+# The consuming repo provides release-please-config.json + .release-please-manifest.json.
+# Go repos add a .goreleaser.yaml (release-type: go, draft: true); Actions repos that
+# commit dist/ set vanity-tags: true so their @v1/@v1.1 consumers track each release.
 #
 # Runs via workflow_call from a thin caller (examples/release.yaml) that owns the
 # push trigger and grants the release permissions.
@@ -41,11 +44,6 @@ on:
         description: File the Go version is read from (passed to setup-go).
         required: false
         default: go.mod
-        type: string
-      node-version-file:
-        description: File the Node version is read from (passed to setup-node).
-        required: false
-        default: .node-version
         type: string
       vanity-tags:
         description: >-
@@ -112,7 +110,7 @@ on:
 
 # Granted per job below. Note for callers: GitHub validates a reusable workflow's
 # permissions as the union of every job and ignores `if:`, so a caller must grant
-# the goreleaser job's id-token/attestations/artifact-metadata even on the publish
+# the goreleaser job's id-token/attestations/artifact-metadata even on the non-Go
 # path where that job is skipped -- see examples/release.yaml.
 permissions: {}
 
@@ -275,69 +273,32 @@ jobs:
         with:
           subject-checksums: ./dist/checksums.txt
 
-      - name: Move vanity tags
-        if: ${{ inputs.vanity-tags }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-          SHA: ${{ needs.release-please.outputs.sha }}
-        run: |
-          set -eu
-          MAJOR="${TAG%%.*}" # v1
-          MINOR="${TAG%.*}"  # v1.1
-          for ref in "$MAJOR" "$MINOR"; do
-            gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$ref" -X PATCH -f sha="$SHA" -F force=true ||
-            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$ref" -f sha="$SHA"
-          done
-
-  publish:
-    needs: release-please
-    # Same trusted-trigger allowlist as the goreleaser job above (fails closed on
-    # any event type not vetted here).
+  # Move the floating major/minor tags (v1, v1.1) that consumers pin onto the new
+  # release commit -- one implementation shared by both paths, ordered last. It
+  # needs goreleaser, so on the Go path the tags advance only after that job has
+  # published and attested the release (never pointing @v1 at a half-finished
+  # release); on every other path goreleaser is skipped and this runs straight
+  # after release-please. The release was already cut by release-please and dist/
+  # freshness is enforced in CI, so there is nothing to build or verify -- a pure
+  # tag move via the API, no checkout or toolchain.
+  #
+  # `!cancelled()` is required so a skipped goreleaser (the non-Go path) does not
+  # skip this job by dependency; the result guard then proceeds only when goreleaser
+  # succeeded or was skipped, never when it failed -- so a failed release never
+  # advances the tags. Same trusted-trigger allowlist as goreleaser (fails closed on
+  # any event type not vetted here).
+  vanity-tags:
+    needs: [release-please, goreleaser]
     if: >-
-      needs.release-please.outputs.release_created && !needs.release-please.outputs.goreleaser &&
+      !cancelled() && inputs.vanity-tags && needs.release-please.outputs.release_created &&
+      (needs.goreleaser.result == 'success' || needs.goreleaser.result == 'skipped') &&
       contains(fromJSON('["push","workflow_dispatch","schedule"]'), github.event_name)
     runs-on: ubuntu-latest
     permissions:
       # move vanity tags
       contents: write
     steps:
-      - name: Checkout repository at release tag
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-          persist-credentials: false # build + verify only; vanity tags move via the GITHUB_TOKEN env
-
-      # Only a root go.mod (not the universal addlicense go.work/tools/go.mod) marks
-      # a repo that builds Go; a `make build` for a non-Go repo needs no toolchain.
-      - name: Setup go
-        if: hashFiles('go.mod')
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version-file: ${{ inputs.go-version-file }}
-          cache: true
-
-      - name: Setup node
-        if: hashFiles('package.json')
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: ${{ inputs.node-version-file }}
-          cache: npm
-
-      - name: Install node packages
-        if: hashFiles('package.json')
-        run: npm ci
-
-      - name: Run build pipeline
-        run: make build
-
-      # Verify a committed dist/ reproduces from source. Vacuous (and harmless) for
-      # repos that don't commit a dist/ -- the pathspec simply matches nothing.
-      - name: Verify dist/ is up to date
-        run: git diff --exit-code -- dist
-
       - name: Move vanity tags
-        if: ${{ inputs.vanity-tags }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
