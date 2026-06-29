@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.1](https://github.com/bitwise-media-group/github-workflows/compare/v3.2.0...v3.2.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **ci:** verify committed dist/ after build; drop redundant npm ci ([aaa75ed](https://github.com/bitwise-media-group/github-workflows/commit/aaa75ed70a1a0d5f879012013ffba8579a869bbe))
+* **release:** verify dist/ in CI, not after the release is cut ([f68fb68](https://github.com/bitwise-media-group/github-workflows/commit/f68fb688e2d5bb02a9bb4237a03d3412849bbb31))
+
 ## [3.2.0](https://github.com/bitwise-media-group/github-workflows/compare/v3.1.0...v3.2.0) (2026-06-28)
 
 
