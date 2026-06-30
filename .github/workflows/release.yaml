@@ -332,6 +332,9 @@ jobs:
           # build the exact commit the release was tagged at
           ref: ${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false # read-only checkout; don't leave the token in .git/config
+          # pull Git LFS objects so Zensical embeds real assets, not pointer files; a
+          # no-op on repos that track nothing in LFS.
+          lfs: true
 
       - name: Setup uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
