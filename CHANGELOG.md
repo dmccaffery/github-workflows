@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.4](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.3...v4.0.4) (2026-06-30)
+
+
+### Bug Fixes
+
+* **release:** pull Git LFS objects in the docs publish job ([3fe6080](https://github.com/bitwise-media-group/github-workflows/commit/3fe6080586e36ba0789ce25ca2463628d505923a))
+
 ## [4.0.3](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.2...v4.0.3) (2026-06-29)
 
 
