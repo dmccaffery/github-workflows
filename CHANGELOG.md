@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.4...v4.1.0) (2026-07-01)
+
+
+### Features
+
+* add reusable add-to-project workflow ([bdbbccc](https://github.com/bitwise-media-group/github-workflows/commit/bdbbccc908d93828cb81c94ee53dfd822310b62a))
+
 ## [4.0.4](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.3...v4.0.4) (2026-06-30)
 
 
