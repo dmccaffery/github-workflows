@@ -1,0 +1,31 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
+# Caller workflow — copy to `.github/workflows/add-to-project.yaml` in any repo (the
+# github-settings org-sync fans this out automatically via `org-config.sh
+# workflows-sync`). When an issue is opened it is added to the shared org "Roadmap"
+# project, so every repo's issues collect in one board.
+#
+# Pin @v4 to a release tag or full commit SHA — see README "Pinning".
+#
+# Org prerequisites: the "Project Sync" App (organization projects read/write, issues
+# + pull-requests read) installed on all repositories, exposed as the
+# ADD_TO_PROJECT_CLIENT_ID variable + ADD_TO_PROJECT_PRIVATE_KEY secret.
+
+name: Add to Project
+
+on:
+  issues:
+    types: [opened]
+
+# the App token does the privileged work; the caller grants nothing
+permissions: {}
+
+jobs:
+  add:
+    uses: bitwise-media-group/github-workflows/.github/workflows/add-to-project.yaml@v4
+    with:
+      project-url: https://github.com/orgs/bitwise-media-group/projects/1
+      app-client-id: ${{ vars.ADD_TO_PROJECT_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.ADD_TO_PROJECT_PRIVATE_KEY }}

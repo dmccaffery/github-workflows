@@ -22,6 +22,7 @@ action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 | [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                             |
 | [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                                       |
 | [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                          |
+| [`add-to-project.yaml`](#add-to-projectyaml)     | any      | adds newly opened issues to a shared org Projects v2 board via a "Project Sync" App token                                 |
 
 Each workflow below lists its inputs, secrets, and the permission ceiling the **caller** must grant — a reusable
 workflow's jobs cannot exceed the permissions of the job that calls them. The snippet is the minimal caller; follow the
@@ -286,6 +287,44 @@ jobs:
 ```
 
 Full example: [`examples/dependabot-merge.yaml`](examples/dependabot-merge.yaml).
+
+### `add-to-project.yaml`
+
+_Any repo._ Adds the triggering issue (or PR) to a shared organisation **Projects v2** board — the org "Roadmap" — so
+new issues from every repo collect in one place. `GITHUB_TOKEN` cannot write an org-level project, so this mints a
+short-lived token from a dedicated **Project Sync** GitHub App (the same `create-github-app-token` pattern as
+[`merge.yaml`](#mergeyaml)), downscoped to `organization-projects: write` plus `issues` / `pull-requests: read`, and
+hands it to [`actions/add-to-project`](https://github.com/actions/add-to-project). The App must be installed on the repo
+whose issue fires the caller — install it on **all repositories**. In this org the caller is fanned out to every repo by
+`org-config.sh workflows-sync` in [`github-settings`](https://github.com/bitwise-media-group/github-settings).
+
+- **Inputs:** `project-url` (required; `https://github.com/orgs/<org>/projects/<n>`), `app-client-id` (required;
+  `vars.ADD_TO_PROJECT_CLIENT_ID`), `labeled` (optional; comma-separated labels to filter on), `label-operator`
+  (optional; `AND` / `OR` / `NOT`, default `OR`).
+- **Secrets:** `app-private-key` — required (`secrets.ADD_TO_PROJECT_PRIVATE_KEY`).
+- **Permissions (caller grants):** none — the App token does the privileged work, so the caller job sets
+  `permissions: {}`.
+- **Triggers (the caller owns it):** `issues` (`opened`) is the usual choice; any event carrying an issue or PR works.
+- **Org setup (one-time):** create a **Project Sync** App with organization **projects** read/write and repository
+  **issues** + **pull requests** read, install it on all repositories, and expose it as the `ADD_TO_PROJECT_CLIENT_ID`
+  variable + `ADD_TO_PROJECT_PRIVATE_KEY` secret.
+
+```yaml
+on:
+  issues:
+    types: [opened]
+permissions: {}
+jobs:
+  add:
+    uses: bitwise-media-group/github-workflows/.github/workflows/add-to-project.yaml@v4
+    with:
+      project-url: https://github.com/orgs/bitwise-media-group/projects/1
+      app-client-id: ${{ vars.ADD_TO_PROJECT_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.ADD_TO_PROJECT_PRIVATE_KEY }}
+```
+
+Full example: [`examples/add-to-project.yaml`](examples/add-to-project.yaml).
 
 ## Consumer contracts
 

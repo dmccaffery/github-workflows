@@ -1,0 +1,78 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
+# Reusable add-to-project — adds the triggering issue (or PR) to a shared
+# organisation Projects v2 board. Called via workflow_call from a thin caller that
+# triggers on `issues` (typically opened), so a single org project — the "Roadmap"
+# board — collects new issues from every repo in one place instead of each repo
+# keeping its own.
+#
+# GITHUB_TOKEN cannot write an organisation-level project, so this mints a
+# short-lived token from a dedicated "Project Sync" GitHub App — the same
+# create-github-app-token pattern merge.yaml uses — downscoped to
+# organization-projects:write plus issues/pull-requests:read, and hands it to
+# actions/add-to-project. The caller grants nothing (permissions: {}); the App token
+# does the privileged work. Org-level permissions ride on the installation token, so
+# no owner/repositories narrowing is needed — but the App must be installed on the
+# repo whose issue fired the caller (install it on all repositories).
+#
+# Org prerequisites: a "Project Sync" App with organization projects read/write and
+# issues + pull-requests read, installed on all repositories, exposed as the
+# ADD_TO_PROJECT_CLIENT_ID variable + ADD_TO_PROJECT_PRIVATE_KEY secret. See README.
+
+name: Reusable Add to Project
+
+on:
+  workflow_call:
+    inputs:
+      project-url:
+        description: The Projects v2 board to add items to (https://github.com/orgs/<org>/projects/<n>).
+        required: true
+        type: string
+      app-client-id:
+        description: Client id of the Project Sync GitHub App (vars.ADD_TO_PROJECT_CLIENT_ID).
+        required: true
+        type: string
+      labeled:
+        description: Optional comma-separated labels; when set, only items carrying them are added.
+        required: false
+        default: ""
+        type: string
+      label-operator:
+        description: How `labeled` is matched — AND, OR, or NOT (default OR).
+        required: false
+        default: OR
+        type: string
+    secrets:
+      app-private-key:
+        description: Private key of the Project Sync GitHub App (secrets.ADD_TO_PROJECT_PRIVATE_KEY).
+        required: true
+
+# the App token does the privileged work; the job's GITHUB_TOKEN is unused
+permissions: {}
+
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          # add-to-project writes the item into the org project (organization-projects)
+          # and reads the triggering issue / PR to resolve its node id (issues,
+          # pull-requests). Org-level permissions ride on the installation token, so no
+          # owner/repositories narrowing is needed.
+          permission-organization-projects: write
+          permission-issues: read
+          permission-pull-requests: read
+
+      - name: Add to project
+        uses: actions/add-to-project@5afcf98fcd03f1c2f92c3c83f58ae24323cc57fd # v2.0.0
+        with:
+          project-url: ${{ inputs.project-url }}
+          github-token: ${{ steps.app.outputs.token }}
+          labeled: ${{ inputs.labeled }}
+          label-operator: ${{ inputs.label-operator }}
