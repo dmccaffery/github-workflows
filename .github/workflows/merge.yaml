@@ -133,7 +133,7 @@ jobs:
           permission-statuses: read
 
       - name: Fast-forward merge
-        uses: bitwise-media-group/ff-merge@261714459a53c43ba032fe0e3a3e6f3ab8fd14de # v1.2.0
+        uses: bitwise-media-group/ff-merge@94615f876da1a46e175f1fd7c5d2f2798030fe3b # v1.3.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
@@ -219,7 +219,7 @@ jobs:
         # fail the run. The merge-on-checks / merge-on-review-completed jobs retry when
         # the state changes; an already-approved, already-green PR merges right here.
         continue-on-error: true
-        uses: bitwise-media-group/ff-merge@261714459a53c43ba032fe0e3a3e6f3ab8fd14de # v1.2.0
+        uses: bitwise-media-group/ff-merge@94615f876da1a46e175f1fd7c5d2f2798030fe3b # v1.3.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
@@ -283,7 +283,7 @@ jobs:
         # retries when the next required workflow finishes.
         if: steps.pr.outputs.number != ''
         continue-on-error: true
-        uses: bitwise-media-group/ff-merge@261714459a53c43ba032fe0e3a3e6f3ab8fd14de # v1.2.0
+        uses: bitwise-media-group/ff-merge@94615f876da1a46e175f1fd7c5d2f2798030fe3b # v1.3.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
@@ -356,7 +356,7 @@ jobs:
         # next workflow_run — or the scheduled sweep — retries.
         if: steps.pr.outputs.number != ''
         continue-on-error: true
-        uses: bitwise-media-group/ff-merge@261714459a53c43ba032fe0e3a3e6f3ab8fd14de # v1.2.0
+        uses: bitwise-media-group/ff-merge@94615f876da1a46e175f1fd7c5d2f2798030fe3b # v1.3.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
@@ -444,7 +444,7 @@ jobs:
         # Best effort: ff-merge declines a PR that is not yet approved/green (expected
         # for one still in flight); the next sweep or an event path retries.
         continue-on-error: true
-        uses: bitwise-media-group/ff-merge@261714459a53c43ba032fe0e3a3e6f3ab8fd14de # v1.2.0
+        uses: bitwise-media-group/ff-merge@94615f876da1a46e175f1fd7c5d2f2798030fe3b # v1.3.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}

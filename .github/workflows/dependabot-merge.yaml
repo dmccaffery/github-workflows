@@ -218,7 +218,7 @@ jobs:
         # fail the run; the next workflow_run retries.
         if: steps.assess.outputs.number != ''
         continue-on-error: true
-        uses: bitwise-media-group/ff-merge@261714459a53c43ba032fe0e3a3e6f3ab8fd14de # v1.2.0
+        uses: bitwise-media-group/ff-merge@94615f876da1a46e175f1fd7c5d2f2798030fe3b # v1.3.0
         with:
           token: ${{ steps.app.outputs.token }}
           repository: ${{ github.repository }}
