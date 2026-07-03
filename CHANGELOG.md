@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.2.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.1.1...v4.2.0) (2026-07-03)
+
+
+### Features
+
+* **dependabot-merge:** squash-merge Dependabot PRs instead of fast-forwarding ([b7771a1](https://github.com/bitwise-media-group/github-workflows/commit/b7771a11d74ee9b1295e143650155f05c8b3c142))
+
 ## [4.1.1](https://github.com/bitwise-media-group/github-workflows/compare/v4.1.0...v4.1.1) (2026-07-03)
 
 
