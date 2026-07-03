@@ -3,8 +3,10 @@
 
 # Keep the SHA-pinned actions in the reusable workflows fresh, and the pinned npm
 # dev-tooling (prettier, markdownlint-cli2) that `make fmt`/`make lint` run up to date.
-# github-actions bumps reach consumers, so they ship as `deps` and cut a release; the npm
-# dev-tools are local-only, so they ship as `build` (release-please-ignored) and never do.
+# github-actions bumps reach consumers pinned to our SHAs/tags, so they ship as `fix` and
+# cut a release-please patch that trickles the update out; `deps` never would (it is not a
+# recognised type, so release-please ignores it). The npm dev-tools are local-only, so they
+# ship as `build` (release-please-ignored) and never cut a release.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -12,8 +14,9 @@ updates:
     schedule:
       interval: daily
     commit-message:
-      prefix: deps
-      prefix-development: build
+      # `fix` so release-please cuts a patch and consumers pinned to our SHAs/tags pick the
+      # bump up; the actions ecosystem has no dev/prod split, so a single prefix covers all
+      prefix: fix
       include: scope
     cooldown:
       default-days: 7
