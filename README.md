@@ -21,7 +21,7 @@ action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 | [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward merge — `/merge` now, or `/auto-merge` (comment/label) when approved + green            |
 | [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                             |
 | [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                                       |
-| [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and fast-forwards them once CI is green                                          |
+| [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and squash-merges them once CI is green                                          |
 | [`add-to-project.yaml`](#add-to-projectyaml)     | any      | adds newly opened issues to a shared org Projects v2 board via a "Project Sync" App token                                 |
 
 Each workflow below lists its inputs, secrets, and the permission ceiling the **caller** must grant — a reusable
@@ -251,13 +251,17 @@ Full example: [`examples/merge-notice.yaml`](examples/merge-notice.yaml).
 
 ### `dependabot-merge.yaml`
 
-_Any repo._ Auto-approves Dependabot **minor and patch** PRs, then fast-forwards them into the base branch once CI is
-green — using the same signature-preserving `ff-merge` action as [`merge.yaml`](#mergeyaml). Major updates are never
-approved, so they wait for a human. Both the approval and the merge are done with the "FF Merge" App token, so approval
-works regardless of the org "Allow GitHub Actions to approve pull requests" setting (that only restricts
-`GITHUB_TOKEN`). It triggers only on `workflow_run` — an event that adds no check run to the PR, so it leaves no
-skipped-job clutter — and reads the minor/patch-vs-major policy from the trailer in Dependabot's commit, only after
-verifying the head commit is authored by `dependabot[bot]` and carries a valid signature. Requires a
+_Any repo._ Auto-approves Dependabot **minor and patch** PRs, then **squash-merges** them into the base branch once
+every check on the head is green. Squash — not the fast-forward `/merge` uses — so queued Dependabot PRs merge without a
+rebase (and a CI rerun) between each one; only genuinely conflicting PRs wait for Dependabot's rebase. Major updates are
+never approved, so they wait for a human. Both the approval and the merge are done with the "FF Merge" App token, so
+approval works regardless of the org "Allow GitHub Actions to approve pull requests" setting (that only restricts
+`GITHUB_TOKEN`), and the App's ruleset bypass covers the rebase-only merge-method rule — the merge button stays dead for
+everyone else. The squash commit GitHub creates is web-flow-signed and single-parent (satisfying required-signatures and
+linear-history rules), titled with Dependabot's Conventional-Commit subject so release-please reads it unchanged. It
+triggers only on `workflow_run` — an event that adds no check run to the PR, so it leaves no skipped-job clutter — and
+reads the minor/patch-vs-major policy from the trailer in Dependabot's commit, only after verifying the head commit is
+authored by `dependabot[bot]` and carries a valid signature. Requires a
 [`.github/dependabot.yaml`](https://docs.github.com/en/code-security/dependabot/dependabot-version-updates) so
 Dependabot opens PRs, and branch protection that requires PR review (so the approval sets the review decision) — the
 same assumption as the `/merge` flow.
@@ -268,7 +272,7 @@ same assumption as the `/merge` flow.
 - **Permissions (caller grants):** none — the App token does the privileged work, so the caller job sets
   `permissions: {}`.
 - **Triggers (the caller owns it):** `workflow_run` (`completed`) listing your CI workflow name(s) — the reusable
-  workflow approves and fast-forwards once they finish green. No `pull_request_target` (so no skipped-check clutter);
+  workflow approves and squash-merges once they finish green. No `pull_request_target` (so no skipped-check clutter);
   `check_suite` is _not_ used either — GitHub does not fire it for a repo's own Actions CI.
 
 ```yaml
@@ -360,9 +364,10 @@ Dependabot can bump either. Avoid `@main` except for short-lived testing.
 
 ## Fast-forward merge: org setup
 
-`merge.yaml` (the `/merge` + auto-merge flows) and `dependabot-merge.yaml` drive the `bitwise-media-group/ff-merge`
-action; `merge-notice.yaml` posts the companion convention reminder. The one-time org setup (the "FF Merge" GitHub App,
-its ruleset bypass, and the `FF_MERGE_CLIENT_ID` variable + `FF_MERGE_PRIVATE_KEY` secret) is documented in
+`merge.yaml` (the `/merge` + auto-merge flows) drives the `bitwise-media-group/ff-merge` action; `dependabot-merge.yaml`
+squash-merges directly with the same App token and ruleset bypass; `merge-notice.yaml` posts the companion convention
+reminder. The one-time org setup (the "FF Merge" GitHub App, its ruleset bypass, and the `FF_MERGE_CLIENT_ID` variable +
+`FF_MERGE_PRIVATE_KEY` secret) is documented in
 [`bitwise-media-group/ff-merge`](https://github.com/bitwise-media-group/ff-merge).
 
 > **Note on App input names.** This library's contract is input `app-client-id` + secret `app-private-key`, backed by

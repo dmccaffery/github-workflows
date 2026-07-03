@@ -3,19 +3,19 @@
 
 # This repo's own caller for the reusable Dependabot auto-merge workflow — the
 # library dogfoods it. Dependabot opens github-actions pin-bump PRs (see
-# .github/dependabot.yaml); minor/patch ones are auto-approved and fast-forwarded
+# .github/dependabot.yaml); minor/patch ones are auto-approved and squash-merged
 # once this repo's CI is green, keeping the reusable workflows' SHA pins fresh
-# with no human in the loop.
+# with no human in the loop (and no rebase between queued Dependabot PRs).
 #
 # Calls the reusable workflow by local path so it tracks this repo's current
 # definition rather than a pinned release (like self-merge.yaml).
 #
-# Just workflow_run: the reusable workflow approves and fast-forwards once CI is green,
+# Just workflow_run: the reusable workflow approves and squash-merges once CI is green,
 # reading the minor/patch policy from Dependabot's signed commit (so no
 # pull_request_target, and no skipped-job clutter on the PR). The workflow_run list names
 # every workflow that must pass — "Continuous Integration" (self-ci.yaml) and
 # "Security Analysis" (self-security.yaml); whichever finishes last triggers the merge
-# attempt, and ff-merge verifies all checks before moving the ref.
+# attempt, and the merge job verifies every check is green before squashing.
 #
 # Org prerequisites (see bitwise-media-group/ff-merge): the FF_MERGE_CLIENT_ID
 # variable + FF_MERGE_PRIVATE_KEY secret and the "FF Merge" App in main's ruleset

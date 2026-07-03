@@ -2,10 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 # Reusable Dependabot auto-merge. Dependabot opens a PR; if it is a minor or patch
-# update this approves it, then fast-forwards it into the base branch once CI is
-# green — preserving Dependabot's signed commits with the same `ff-merge` action that
-# backs the `/merge` flow (see merge.yaml). Major updates are never approved, so they
-# wait for a human.
+# update this approves it, then SQUASH-merges it into the base branch once every
+# check on its head is green. Squash — not the fast-forward the `/merge` flow uses
+# (see merge.yaml) — so a green PR that is merely *behind* the base branch still
+# merges: queued Dependabot PRs no longer need a rebase (and a full CI rerun)
+# between each merge, and only genuinely conflicting PRs wait for Dependabot's
+# rebase. Major updates are never approved, so they wait for a human.
+#
+# The squash is a plain PR merge performed as the App, which sits in the ruleset
+# bypass list (the same listing the `/merge` flow relies on), so the rebase-only
+# merge-method rule does not apply to it — no ruleset or repo-setting change is
+# needed, and the merge button stays dead for everyone else. The squash commit
+# GitHub creates server-side is web-flow-signed and single-parent, satisfying the
+# base branch's required-signatures and linear-history rules, and its title is
+# Dependabot's Conventional-Commit subject, so release-please reads the squash
+# exactly as it read a fast-forwarded Dependabot commit.
 #
 # One event, one job. The caller triggers only on workflow_run(completed) — an event
 # that does NOT attach a check run to the PR, so this workflow leaves no skipped-job
@@ -25,10 +36,11 @@
 #      EVERY level found in the message is within `update-types` — so a tampered or grouped
 #      commit that hides a major is not approved;
 #   3. approves the PR (App token) when, and only when, the update is in policy;
-#   4. fast-forwards. The merge runs whenever an approval exists (ff-merge
-#      require-approval: true) — the bot's for in-policy updates, or a human's for anything
-#      they choose to approve — and ff-merge re-verifies all checks, the approval, and a
-#      genuine fast-forward before moving the ref. workflow_run — not check_suite — is used
+#   4. squash-merges. The merge runs whenever an approval exists — the bot's for in-policy
+#      updates, or a human's for anything they choose to approve — and the job re-verifies
+#      the review decision and that EVERY check run and commit status on the head is green
+#      (the same all-green gate ff-merge applies to /merge, not just the ruleset-required
+#      subset) before merging. workflow_run — not check_suite — is used
 #      because GitHub does not fire check_suite/check_run for a repo's own GitHub Actions CI.
 #
 # Approval and the merge both use a short-lived App token: a GitHub App can approve
@@ -85,9 +97,10 @@ jobs:
         with:
           client-id: ${{ inputs.app-client-id }}
           private-key: ${{ secrets.app-private-key }}
-          # ff-merge moves the ref (contents) and reads/approves the PR (pull-requests),
-          # needs workflows to move a ref whose commits touch .github/workflows/ files,
-          # and reads the head commit's status rollup — Checks-API check runs (checks)
+          # the merge writes the squash commit to the base branch (contents) and
+          # reads/approves/merges the PR (pull-requests), needs workflows because
+          # Dependabot's actions bumps touch .github/workflows/ files, and the all-green
+          # gate reads the head commit's status rollup — Checks-API check runs (checks)
           # plus legacy commit statuses (statuses); the approval (minor/patch only) is
           # the authorization gate, not maintainer-only, so no administration scope is
           # needed.
@@ -116,6 +129,7 @@ jobs:
             --json number,author,headRefOid \
             --jq 'map(select(.author.is_bot and (.author.login == "dependabot[bot]" or .author.login == "app/dependabot"))) | .[0] | "\(.number // "") \(.headRefOid // "")"')
           echo "number=${number}" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
           if [ -z "$number" ]; then
             echo "No open Dependabot PR for ${BRANCH}; nothing to do."
             echo "approve=false" >> "$GITHUB_OUTPUT"
@@ -210,21 +224,76 @@ jobs:
           gh pr review "$PR" --repo "$REPO" --approve \
             --body "Auto-approving in-policy Dependabot update."
 
-      - name: Fast-forward merge
-        # Runs whenever a PR was found. ff-merge merges only if the PR is approved — the
-        # bot's approval above for in-policy updates, or a human's for anything they chose
-        # to approve — and every check is green. Best effort: a decline (another watched
-        # workflow still pending, or no approval yet for an out-of-policy update) must not
-        # fail the run; the next workflow_run retries.
+      - name: Squash merge
+        # Runs whenever a PR was found. Merges only if the PR is approved — the bot's
+        # approval above for in-policy updates, or a human's for anything they chose to
+        # approve (the approval is the authorization gate; Dependabot is not a
+        # maintainer, so the actor's access is not checked) — and every check run and
+        # commit status on the head is green. Expected holds — no approval yet, another
+        # watched workflow still pending or red, a conflict left for Dependabot's
+        # rebase, or a head that moved — exit 0 and the next workflow_run (or
+        # Dependabot's rebase) retries; anything else fails the run so it is seen.
         if: steps.assess.outputs.number != ''
-        continue-on-error: true
-        uses: bitwise-media-group/ff-merge@94615f876da1a46e175f1fd7c5d2f2798030fe3b # v1.3.0
-        with:
-          token: ${{ steps.app.outputs.token }}
-          repository: ${{ github.repository }}
-          pr-number: ${{ steps.assess.outputs.number }}
-          # The approval (minor/patch only, unless a human approves otherwise) is the
-          # authorization gate; Dependabot is not a maintainer, so do not require write
-          # access of the actor.
-          require-approval: true
-          maintainer-only: false
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.assess.outputs.number }}
+          SHA: ${{ steps.assess.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          # The PR must be approved and still point at the head commit whose policy was
+          # assessed above; a conflicted PR is Dependabot's to rebase. GitHub computes
+          # mergeability lazily, so poll briefly while it reports UNKNOWN (and proceed
+          # if it stays UNKNOWN — a real conflict then fails the merge, visibly).
+          for _ in 1 2 3 4 5; do
+            pr=$(gh pr view "$PR" --repo "$REPO" --json state,reviewDecision,mergeable,headRefOid)
+            [ "$(printf '%s' "$pr" | jq -r .mergeable)" != "UNKNOWN" ] && break
+            sleep 3
+          done
+          state=$(printf '%s' "$pr" | jq -r .state)
+          decision=$(printf '%s' "$pr" | jq -r .reviewDecision)
+          mergeable=$(printf '%s' "$pr" | jq -r .mergeable)
+          head=$(printf '%s' "$pr" | jq -r .headRefOid)
+          if [ "$state" != "OPEN" ]; then
+            echo "PR #${PR} is ${state}; nothing to do."
+            exit 0
+          fi
+          if [ "$decision" != "APPROVED" ]; then
+            echo "PR #${PR} review decision is ${decision:-none}, not APPROVED; not merging."
+            exit 0
+          fi
+          if [ "$head" != "$SHA" ]; then
+            echo "PR #${PR} head moved (${head} != ${SHA}); the new head's own CI run retries."
+            exit 0
+          fi
+          if [ "$mergeable" = "CONFLICTING" ]; then
+            echo "PR #${PR} conflicts with its base branch; waiting for Dependabot to rebase."
+            exit 0
+          fi
+
+          # EVERY check run must be completed with success/neutral/skipped and EVERY
+          # commit status green — all checks, not just the ruleset-required subset (the
+          # same gate ff-merge enforces for /merge). A watched workflow still running
+          # holds the merge; its own completion event retries.
+          blocking=$(gh api --paginate "repos/${REPO}/commits/${SHA}/check-runs?per_page=100" \
+            --jq '.check_runs[]
+                  | select(.status != "completed" or ((.conclusion // "") | IN("success","neutral","skipped") | not))
+                  | "\(.name) (\(.conclusion // .status))"')
+          if [ -n "$blocking" ]; then
+            printf 'Checks on %s are not all green yet:\n%s\n' "$SHA" "$blocking"
+            exit 0
+          fi
+          combined=$(gh api "repos/${REPO}/commits/${SHA}/status")
+          if [ "$(printf '%s' "$combined" | jq -r .total_count)" != "0" ] \
+            && [ "$(printf '%s' "$combined" | jq -r .state)" != "success" ]; then
+            echo "Combined commit status on ${SHA} is $(printf '%s' "$combined" | jq -r .state); not merging."
+            exit 0
+          fi
+
+          # A plain squash merge as the App — a ruleset bypass actor, so the rebase-only
+          # merge-method rule does not block it. --match-head-commit closes the
+          # verify-then-merge race: a push landing after the checks above makes GitHub
+          # refuse rather than merge an unverified head.
+          gh pr merge "$PR" --repo "$REPO" --squash --match-head-commit "$SHA"
+          echo "Squash-merged PR #${PR} at ${SHA}."
