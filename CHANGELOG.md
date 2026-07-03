@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.1.1](https://github.com/bitwise-media-group/github-workflows/compare/v4.1.0...v4.1.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **dependabot:** update commit message for actions ecosystem ([73bf248](https://github.com/bitwise-media-group/github-workflows/commit/73bf2486a245aec38c20705180f27d77bb2584f7)), closes [#39](https://github.com/bitwise-media-group/github-workflows/issues/39)
+* **deps:** Bump actions/attest in the actions group across 1 directory ([cc12b81](https://github.com/bitwise-media-group/github-workflows/commit/cc12b8144cc8e475edd718a29a3b3ad7823e2c0d))
+
 ## [4.1.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.0.4...v4.1.0) (2026-07-01)
 
 
