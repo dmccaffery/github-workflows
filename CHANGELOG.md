@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.3.1](https://github.com/bitwise-media-group/github-workflows/compare/v4.3.0...v4.3.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **add-to-project:** restore the reusable workflow clobbered by workflows-sync ([9e30241](https://github.com/bitwise-media-group/github-workflows/commit/9e302410110d773452cc5d77af764915fd8cade3))
+* **dependabot-merge:** retry auto-merge after the approval-raised review-ack check settles ([8af393e](https://github.com/bitwise-media-group/github-workflows/commit/8af393e52c723fa8f3e07f07f171bc66e7cb0c03))
+* **deps:** Bump bitwise-media-group/github-workflows/.github/workflows/add-to-project.yaml ([#50](https://github.com/bitwise-media-group/github-workflows/issues/50)) ([218bbdc](https://github.com/bitwise-media-group/github-workflows/commit/218bbdce2523c68f9f735a6a9e1aa0816d8d0b97))
+* **deps:** Bump goreleaser/goreleaser-action ([#51](https://github.com/bitwise-media-group/github-workflows/issues/51)) ([06546be](https://github.com/bitwise-media-group/github-workflows/commit/06546be4003a3a7030e91970113a73dfc6dab1ec))
+* **release:** install syft from the make library pin for SBOM generation ([6548ec2](https://github.com/bitwise-media-group/github-workflows/commit/6548ec284f7884c7030cf82db1f4804904b6fc8b))
+
 ## [4.3.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.2.0...v4.3.0) (2026-07-04)
 
 
