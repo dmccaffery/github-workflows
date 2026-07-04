@@ -2,8 +2,8 @@
   "name": "github-workflows",
   "private": true,
   "scripts": {
-    "fmt": "prettier --write \"**/*.md\"",
-    "fmt:check": "prettier --check \"**/*.md\"",
+    "format": "prettier --write \"**/*.md\"",
+    "format:check": "prettier --check \"**/*.md\"",
     "lint": "markdownlint-cli2",
     "lint:fix": "markdownlint-cli2 --fix"
   },

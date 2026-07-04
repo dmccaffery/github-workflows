@@ -1,8 +1,9 @@
 # Copyright 2026 BitWise Media Group Ltd
 # SPDX-License-Identifier: MIT
 
-# Keep the SHA-pinned actions in the reusable workflows fresh, and the pinned npm
-# dev-tooling (prettier, markdownlint-cli2) that `make fmt`/`make lint` run up to date.
+# Keep the SHA-pinned actions in the reusable workflows fresh, the pinned npm
+# dev-tooling (prettier, markdownlint-cli2) that `make fmt`/`make lint` run up to date,
+# and the shared Makefile library submodule (make/) tracking its release branch.
 # github-actions bumps reach consumers pinned to our SHAs/tags, so they ship as `fix` and
 # cut a release-please patch that trickles the update out; `deps` never would (it is not a
 # recognised type, so release-please ignores it). The npm dev-tools are local-only, so they
@@ -60,3 +61,23 @@ updates:
       dev-tooling:
         patterns:
           - "*"
+
+  # The shared Makefile library (bitwise-media-group/make) is mounted at make/ and
+  # carries the pinned Go dev CLIs (addlicense, ...) this repo's `make lint` uses.
+  # Track it so a library release (a new `release` branch head) flows here as a bump.
+  # Local tooling only, so `build` (release-please-ignored) — never cuts a release.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: build
+      prefix-development: build
+      include: scope
+    cooldown:
+      default-days: 7
+      # our own make/ submodule ships straight through — no cooldown wait.
+      # Dependabot names a submodule dependency by its path, so exclude "make"
+      # (not an owner glob like the actions ecosystem uses).
+      exclude:
+        - make
