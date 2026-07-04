@@ -43,6 +43,16 @@
 #      subset) before merging. workflow_run — not check_suite — is used
 #      because GitHub does not fire check_suite/check_run for a repo's own GitHub Actions CI.
 #
+# The all-green gate counts the `ack` check that an approval itself raises — the review-ack
+# workflow (see merge-review-ack.yaml) fires on the approving review and posts a check run to
+# the head commit — so the merge must be retried once that check settles. Two things make that
+# work: the caller lists the review-ack workflow among the ones whose completion triggers this
+# job (alongside CI), so ack going green re-enters the merge; and the approval step never
+# re-approves an already-APPROVED PR, because each `gh pr review --approve` submits a fresh
+# review that raises a NEW ack check — re-approving on every retry would spawn a new ack each
+# time and never converge. On a synchronize that dismissed the prior review the decision drops
+# below APPROVED and the approval is restored.
+#
 # Approval and the merge both use a short-lived App token: a GitHub App can approve
 # regardless of the org "Allow GitHub Actions to approve pull requests" setting (that only
 # restricts GITHUB_TOKEN). The caller therefore grants no permissions.
@@ -77,9 +87,13 @@ permissions: {}
 
 jobs:
   merge:
-    # Only when a watched CI workflow for a Dependabot branch finished green.
+    # Only when a watched workflow for a Dependabot branch finished green. The watched set is
+    # CI (a `pull_request` run) plus the review-ack workflow (a `pull_request_review` run whose
+    # completion is how an approval-raised `ack` check going green re-enters the merge); accept
+    # either source event. Runs on `main` (push) never match the `dependabot/` branch filter.
     if: >-
-      github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+      github.event_name == 'workflow_run' && (github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'pull_request_review') &&
       github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch,
       'dependabot/')
     runs-on: ubuntu-latest
@@ -219,8 +233,19 @@ jobs:
           PR: ${{ steps.assess.outputs.number }}
         run: |
           set -euo pipefail
-          # Re-approving is a no-op when an active approval already exists; on a
-          # synchronize that dismissed the prior review this restores it.
+          # Approve only when the PR is not already APPROVED. Each `gh pr review --approve`
+          # submits a FRESH review — a pull_request_review that fires the review-ack workflow
+          # and raises a new `ack` check on the head. Because this job now also retries when
+          # that review-ack workflow completes (see the caller's workflow_run list and the
+          # header), re-approving on every retry would raise a new ack check each time and the
+          # all-green gate would never converge. Skipping the redundant approval breaks that
+          # loop; on a synchronize that dismissed the prior review the decision drops below
+          # APPROVED and this restores it.
+          decision=$(gh pr view "$PR" --repo "$REPO" --json reviewDecision --jq '.reviewDecision')
+          if [ "$decision" = "APPROVED" ]; then
+            echo "PR #${PR} is already APPROVED; not re-approving."
+            exit 0
+          fi
           gh pr review "$PR" --repo "$REPO" --approve \
             --body "Auto-approving in-policy Dependabot update."
 
