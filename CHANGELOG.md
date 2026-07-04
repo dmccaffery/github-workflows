@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.3.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.2.0...v4.3.0) (2026-07-04)
+
+
+### Features
+
+* support the shared Makefile library submodule in CI ([1deab39](https://github.com/bitwise-media-group/github-workflows/commit/1deab3954252cc146d54b0c60d8ff69acfb1c998))
+
+
+### Bug Fixes
+
+* **deps:** Bump zizmorcore/zizmor-action from 0.5.6 to 0.5.7 ([#33](https://github.com/bitwise-media-group/github-workflows/issues/33)) ([959ba90](https://github.com/bitwise-media-group/github-workflows/commit/959ba90ed33e32947ac818ffd9e3fb65515bd254))
+
 ## [4.2.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.1.1...v4.2.0) (2026-07-03)
 
 
