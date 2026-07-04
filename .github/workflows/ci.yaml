@@ -75,12 +75,14 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false # read-only checkout; don't leave the token in .git/config
+          submodules: true # fetch the shared Makefile library (bitwise-media-group/make) that repos include at make/; a no-op where no submodule exists
 
       # Two mutually-exclusive Go setups (hashFiles is '' when nothing matches; a
       # bare filename matches the repo root only). A root go.mod marks a repo that
-      # builds Go -- set up from it, cached on go.sum. Otherwise a go.work with no
-      # root go.mod is the universal tools-only module (go.work + tools/go.mod for
-      # `go tool addlicense`, which `make lint` runs) -- set the toolchain up from it.
+      # builds Go -- set up from it, cached on go.sum. Otherwise a non-Go repo still
+      # needs a toolchain to `go install` the pinned dev CLIs that `make lint` runs
+      # (addlicense, tflint, ...). That version comes from the make library's
+      # make/.go-version, or a legacy tools-only go.work -- set up from whichever exists.
       - name: Setup go
         if: hashFiles('go.mod')
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -90,12 +92,14 @@ jobs:
           cache-dependency-path: ${{ inputs.cache-dependency-path }}
 
       - name: Setup go (tooling)
-        if: ${{ !hashFiles('go.mod') && hashFiles('go.work') }}
+        if: ${{ !hashFiles('go.mod') && (hashFiles('go.work') || hashFiles('.go-version') || hashFiles('make/.go-version')) }}
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: go.work
+          # a legacy tools-only go.work, else a .go-version at the repo root (the make
+          # library itself), else the make submodule's make/.go-version (consumers)
+          go-version-file: ${{ hashFiles('go.work') && 'go.work' || (hashFiles('.go-version') && '.go-version' || 'make/.go-version') }}
           cache: true
-          cache-dependency-path: tools/go.sum
+          cache-dependency-path: ${{ hashFiles('go.work') && 'tools/go.sum' || (hashFiles('.go-version') && '.go-version' || 'make/.go-version') }}
 
       # node is used by Go repos too, for the markdown/prettier doc linters.
       - name: Setup node
@@ -206,6 +210,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false # read-only checkout; don't leave the token in .git/config
+          submodules: true # fetch the shared Makefile library (bitwise-media-group/make) that repos include at make/; a no-op where no submodule exists
 
       - name: Setup go
         if: hashFiles('go.mod')
