@@ -13,9 +13,15 @@
 # Just workflow_run: the reusable workflow approves and squash-merges once CI is green,
 # reading the minor/patch policy from Dependabot's signed commit (so no
 # pull_request_target, and no skipped-job clutter on the PR). The workflow_run list names
-# every workflow that must pass — "Continuous Integration" (self-ci.yaml) and
-# "Security Analysis" (self-security.yaml); whichever finishes last triggers the merge
-# attempt, and the merge job verifies every check is green before squashing.
+# the CI workflows that must pass — "Continuous Integration" (self-ci.yaml) and
+# "Security Analysis" (self-security.yaml) — plus "Merge Review Ack"
+# (self-merge-review-ack.yaml). The merge job's all-green gate counts every check on the
+# head, including the `ack` check that its own approval raises via the review-ack workflow;
+# that check goes green AFTER CI, so watching the review-ack workflow's completion is what
+# re-enters the merge once ack settles. Without it the last CI completion would find ack
+# still pending and defer, and nothing would retry — the PR would sit approved and green but
+# unmerged. Whichever watched workflow finishes last triggers a merge attempt, and the merge
+# job verifies every check is green before squashing.
 #
 # Org prerequisites (see bitwise-media-group/ff-merge): the FF_MERGE_CLIENT_ID
 # variable + FF_MERGE_PRIVATE_KEY secret and the "FF Merge" App in main's ruleset
@@ -24,7 +30,7 @@ name: Dependabot Auto-Merge
 
 on: # zizmor: ignore[dangerous-triggers] -- required: workflow_run gates auto-merge on CI; no PR code is checked out or run
   workflow_run:
-    workflows: ["Continuous Integration", "Security Analysis"]
+    workflows: ["Continuous Integration", "Security Analysis", "Merge Review Ack"]
     types: [completed]
 
 # the app token does the privileged work; the caller grants nothing
