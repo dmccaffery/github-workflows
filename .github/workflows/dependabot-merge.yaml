@@ -200,9 +200,9 @@ jobs:
                 continue
                 ;;
             esac
-            if [ "$oM" != "$nM" ]; then lvl=major
-            elif [ "$om" != "$nm" ]; then lvl=minor
-            else lvl=patch
+            if [ "$oM" != "$nM" ]; then lvl="major"
+            elif [ "$om" != "$nm" ]; then lvl="minor"
+            else lvl="patch"
             fi
             types=$(printf '%s\nversion-update:semver-%s' "$types" "$lvl")
           done <<<"$transitions"

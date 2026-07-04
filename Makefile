@@ -6,12 +6,16 @@
 # compile or exercise); only this repo's extra workflow lint lives here.
 include make/markdown-lib.mk
 
-# zizmor is an extra security linter for GitHub Actions workflows. Keep it
-# optional so a machine without it still lints; the library's `actionlint`
-# target covers the base workflow lint. (.NOTPARALLEL comes from common.mk.)
+# Workflow lint: the library's actionlint target (gotools.mk) for the base
+# workflow lint, plus zizmor as an extra security pass. zizmor stays optional so
+# a machine without it still lints, but when it is present its findings fail the
+# gate — an `A && B || C` chain would swallow a nonzero B. (.NOTPARALLEL comes
+# from common.mk.)
 .PHONY: zizmor
 zizmor: ## lint workflows with zizmor (skipped when not installed)
-	@ command -v zizmor >/dev/null 2>&1 && zizmor .github examples || echo "zizmor not found on PATH; skipping"
+	@ if command -v zizmor >/dev/null 2>&1; then zizmor .github examples; else echo "zizmor not found on PATH; skipping"; fi
 
-# Fold zizmor into the check-mode lint aggregate (runs after prose + license).
-lint: zizmor
+# Fold both into the check-mode lint aggregate (they run after prose + license);
+# actionlint in the gate is what catches a broken reusable-workflow reference
+# before it ships.
+lint: actionlint zizmor

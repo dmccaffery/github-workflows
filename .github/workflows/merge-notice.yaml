@@ -40,6 +40,8 @@ jobs:
           PR: ${{ inputs.pr-number }}
         run: |
           set -euo pipefail
+          # the single-quoted lines are literal markdown; the backticks must not expand
+          # shellcheck disable=SC2016
           printf '%s\n' \
             '> [!NOTE]' \
             '> **Merging this PR:** this repository merges by **fast-forward** so every' \
