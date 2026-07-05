@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.3.1...v4.4.0) (2026-07-05)
+
+
+### Features
+
+* **dependabot-dist:** reusable workflow to rebuild committed dist/ on Dependabot PRs ([8572995](https://github.com/bitwise-media-group/github-workflows/commit/857299502838f64c02aa6c86a6a5a840df8ee9cf))
+
 ## [4.3.1](https://github.com/bitwise-media-group/github-workflows/compare/v4.3.0...v4.3.1) (2026-07-04)
 
 
