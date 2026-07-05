@@ -22,6 +22,7 @@ action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 | [`merge-review-ack.yaml`](#merge-review-ackyaml) | any      | companion to `merge.yaml` — lets fork PRs auto-merge promptly when approved after CI is green                             |
 | [`merge-notice.yaml`](#merge-noticeyaml)         | any      | posts a one-time "this repo merges via `/merge`" comment on new PRs                                                       |
 | [`dependabot-merge.yaml`](#dependabot-mergeyaml) | any      | auto-approves Dependabot minor/patch PRs and squash-merges them once CI is green                                          |
+| [`dependabot-dist.yaml`](#dependabot-distyaml)   | node     | rebuilds committed `dist/` on a Dependabot PR when a bundled-dep bump made CI's dist check go red                         |
 | [`add-to-project.yaml`](#add-to-projectyaml)     | any      | adds newly opened issues to a shared org Projects v2 board via a "Project Sync" App token                                 |
 
 Each workflow below lists its inputs, secrets, and the permission ceiling the **caller** must grant — a reusable
@@ -291,6 +292,46 @@ jobs:
 ```
 
 Full example: [`examples/dependabot-merge.yaml`](examples/dependabot-merge.yaml).
+
+### `dependabot-dist.yaml`
+
+_Node Actions that commit `dist/`._ Closes the gap between a committed build artifact and Dependabot. A
+JavaScript/TypeScript Action ships its bundled `dist/`, and `ci.yaml` fails any PR whose committed `dist/` does not
+reproduce from `src/`. Dependabot bumps a bundled dependency but never runs `make build`, so its PR lands with a stale
+`dist/` and CI goes red — and `dependabot-merge.yaml` waits for green, so the PR sticks. When a watched CI run for a
+`dependabot/` branch **fails**, this checks out the PR head, runs `make build`, and — only if `dist/` actually changed —
+commits the rebuilt bundle back to the PR branch as the "FF Merge" App. That push re-triggers CI (an App-token push
+does; a `GITHUB_TOKEN` push would be suppressed by loop-prevention), so the rerun reproduces `dist/` and goes green. It
+does **not** approve or merge: the rebuild commit makes the head a non-Dependabot commit, so `dependabot-merge.yaml` no
+longer auto-approves — a human approves the (production-dependency) bump and the existing App squash-merge finishes it.
+Dev-only bumps that don't touch `dist/` never fail CI, never reach this workflow, and keep auto-merging. Rebuilding runs
+the PR's dependency tree, so the write-capable App token is kept out of the build: it is minted first but the checkout
+persists no credentials, and the token appears only in the final push step, after the build has run.
+
+- **Inputs:** `app-client-id` (required; `vars.FF_MERGE_CLIENT_ID`), `node-version-file` (optional, default
+  `.node-version`), `paths` (optional; space-separated build-output path(s) to rebuild and commit, default `dist`).
+- **Secrets:** `app-private-key` — required (`secrets.FF_MERGE_PRIVATE_KEY`).
+- **Permissions (caller grants):** none — the App token does the privileged work, so the caller job sets
+  `permissions: {}`.
+- **Triggers (the caller owns it):** `workflow_run` (`completed`) listing your CI workflow name — the reusable workflow
+  filters to failed runs on `dependabot/` branches, so green runs and pushes to `main` are ignored.
+
+```yaml
+on:
+  workflow_run:
+    workflows: ["CI"] # your CI workflow name
+    types: [completed]
+permissions: {}
+jobs:
+  rebuild-dist:
+    uses: bitwise-media-group/github-workflows/.github/workflows/dependabot-dist.yaml@v4
+    with:
+      app-client-id: ${{ vars.FF_MERGE_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.FF_MERGE_PRIVATE_KEY }}
+```
+
+Full example: [`examples/dependabot-dist.yaml`](examples/dependabot-dist.yaml).
 
 ### `add-to-project.yaml`
 

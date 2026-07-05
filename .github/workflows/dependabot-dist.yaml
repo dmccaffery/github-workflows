@@ -1,0 +1,154 @@
+# Copyright 2026 BitWise Media Group Ltd
+# SPDX-License-Identifier: MIT
+
+# Reusable Dependabot dist/ rebuild. A JavaScript/TypeScript Action ships its bundled
+# output committed at dist/, which GitHub runs directly at consumption time with no build
+# step -- so the reusable CI (ci.yaml) fails any PR whose committed dist/ does not
+# reproduce from src/ (`make build` then `git diff --exit-code -- dist`). Dependabot bumps
+# a bundled dependency but never runs `make build`, so its PR lands with a stale dist/ and
+# CI goes red -- and Dependabot auto-merge (dependabot-merge.yaml) waits for green, so the
+# PR sticks.
+#
+# This workflow closes that gap. When a watched CI run for a `dependabot/` branch FAILS, it
+# checks out the PR head, runs `make build`, and -- only if dist/ actually changed --
+# commits the regenerated bundle back to the PR branch as the App. That push re-triggers CI
+# (an App-token push does; a GITHUB_TOKEN push would be suppressed by GitHub's own
+# loop-prevention), and the rerun's dist/ now reproduces, so CI goes green.
+#
+# It deliberately does NOT approve or merge. The rebuild commit makes the PR head a
+# non-Dependabot commit, so dependabot-merge.yaml's author+signature gate stops
+# auto-approving -- a human reviews and approves the (production-dependency) bump, and the
+# existing App squash-merge takes it from there. Dev-only bumps that don't touch dist/
+# never fail CI, never reach this workflow, and keep auto-merging untouched.
+#
+# workflow_run -- not pull_request -- is the trigger, for the same reason dependabot-merge
+# uses it: a Dependabot-triggered pull_request run gets a read-only GITHUB_TOKEN and only
+# Dependabot secrets, so it could neither read the App key nor push a CI-retriggering
+# commit. A workflow_run runs in the base-branch context with the repo's Actions secrets.
+#
+# SECURITY: rebuilding runs the PR's dependency tree (`npm ci` lifecycle scripts + the
+# bundler). To keep the write-capable App token away from that untrusted code, the token is
+# minted first but the checkout persists no credentials and no build step exposes it; the
+# token appears only in the final commit-and-push step, after the build has already run.
+# The blast radius is a Dependabot PR (a same-repo branch carrying dependency bumps), and
+# the token is scoped to contents:write.
+#
+# Requires the same "FF Merge" App as dependabot-merge.yaml -- it already has
+# contents:write and sits in main's ruleset bypass list. Runs via workflow_call from a thin
+# caller (examples/dependabot-dist.yaml) that triggers on the CI workflow's completion.
+name: Reusable Dependabot Dist Rebuild
+
+on:
+  workflow_call:
+    inputs:
+      app-client-id:
+        description: The client id of the github app used to push the rebuilt dist (vars.FF_MERGE_CLIENT_ID)
+        required: true
+        type: string
+      node-version-file:
+        description: File the Node version is read from (passed to setup-node).
+        required: false
+        default: .node-version
+        type: string
+      paths:
+        description: >-
+          Space-separated build-output path(s) to rebuild and commit. Defaults to the
+          node-action archetype's `dist`. Only changes under these paths are committed, so
+          an unrelated CI failure that leaves them untouched is a no-op.
+        required: false
+        default: dist
+        type: string
+    secrets:
+      app-private-key:
+        description: The private key for the github app used to push the rebuilt dist (secrets.FF_MERGE_PRIVATE_KEY)
+        required: true
+
+# the App token does all privileged work; the job GITHUB_TOKEN needs nothing
+permissions: {}
+
+jobs:
+  rebuild:
+    # Only when a CI run for a Dependabot branch FAILED: a green run already has a
+    # reproducing dist/, so there is nothing to rebuild. Restrict to a same-repo
+    # dependabot/ head (never a fork) so the build never runs untrusted fork code with the
+    # App token in reach. Runs on `main` (push) never match the branch filter.
+    if: >-
+      github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/') &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    # Serialize rebuilds for one branch so two CI failures cannot race on the push.
+    concurrency:
+      group: dependabot-dist-${{ github.repository }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Mint a github app installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          # Pushes the rebuilt bundle to the PR branch and nothing else. The commit touches
+          # dist/ only (never .github/workflows/), so no workflows scope is needed.
+          permission-contents: write
+
+      - name: Checkout the Dependabot PR head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          # fetch the shared Makefile library (bitwise-media-group/make) included at make/
+          submodules: true
+          # Fetch with the App token but do NOT persist it: the build below runs the PR's
+          # dependency tree, which must never see the write token. The push step re-supplies
+          # the token explicitly, after the build has run.
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: ${{ inputs.node-version-file }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild the bundle
+        run: make build
+
+      - name: Commit and push the rebuilt bundle if it changed
+        env:
+          TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PATHS: ${{ inputs.paths }}
+        run: |
+          set -euo pipefail
+
+          # Split the space-separated paths input into an array for git.
+          read -ra dist_paths <<< "$PATHS"
+
+          # Nothing to do if the rebuild left the committed bundle unchanged -- e.g. the CI
+          # failure was unrelated to dist/, or a prior rerun already fixed it.
+          if [ -z "$(git status --porcelain -- "${dist_paths[@]}")" ]; then
+            echo "dist/ already reproduces from src/; nothing to rebuild."
+            exit 0
+          fi
+
+          # Author the commit as the App bot. It lives only on the PR branch; the eventual
+          # squash onto the base branch is web-flow-signed by GitHub, so this branch commit
+          # itself needs no signature.
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          git add -- "${dist_paths[@]}"
+          git commit -m "build(deps): rebuild dist for ${BRANCH}"
+
+          # Supply the App token only here, never during the build. An ephemeral basic-auth
+          # extraheader keeps it out of .git/config; the token is a masked secret, so it
+          # stays redacted in logs.
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            push origin "HEAD:${BRANCH}"
+          echo "Pushed rebuilt dist/ to ${BRANCH}; CI will re-run and go green."
