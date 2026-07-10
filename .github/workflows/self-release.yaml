@@ -10,6 +10,10 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual retrigger: a startup_failure run (e.g. org actions-policy rejection)
+  # creates no jobs, so GitHub refuses to re-run it -- dispatch fires a fresh run
+  # without needing another push to main.
+  workflow_dispatch:
 
 # Ceiling for the reusable workflow's release-please + goreleaser/docs/publish jobs.
 # GitHub resolves a reusable workflow's permissions statically at startup: it takes
