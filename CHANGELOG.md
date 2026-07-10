@@ -1,5 +1,22 @@
 # Changelog
 
+## [5.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.4.0...v5.0.0) (2026-07-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* the Makefile contract is removed. The workflows never invoke `make <target>` and no longer recognise the legacy make/ submodule layout; every consuming repo must define its canonical tasks (lint, build, test, e2e) in a root mise.toml or mount the shared library at .mise/ before taking this major.
+
+### Features
+
+* run the canonical CI gates as mise tasks ([503c1a0](https://github.com/bitwise-media-group/github-workflows/commit/503c1a08e4d61aa4e87da8a97919c62709ef0ea5))
+
+
+### Bug Fixes
+
+* **deps:** Bump the github group with 2 updates ([#60](https://github.com/bitwise-media-group/github-workflows/issues/60)) ([f5d544b](https://github.com/bitwise-media-group/github-workflows/commit/f5d544bd54fce74403bc02d532c6e675f2256823))
+* pin the mise binary hash, not the tarball hash ([9956b15](https://github.com/bitwise-media-group/github-workflows/commit/9956b15fc64831a28a1e17e7050ac1d6bf5a45a7))
+
 ## [4.4.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.3.1...v4.4.0) (2026-07-05)
 
 
