@@ -31,6 +31,8 @@ In short: if a change alters what a **consumer's** workflow run does, it's `feat
 
 ## Before committing
 
-Always run `make pr` before creating a commit. It injects license headers, auto-fixes and formats markdown, then lints —
-the same gate CI enforces — so running it first keeps the tree clean and avoids a follow-up "fix lint"/"fix formatting"
-commit. Only commit once `make pr` passes and you have staged everything it changed.
+Always run `mise run pr` before creating a commit (the root `Makefile` is a thin forwarder, so `make pr` works too). It
+injects license headers, auto-fixes and formats markdown, then lints — the same gate CI enforces — so running it first
+keeps the tree clean and avoids a follow-up "fix lint"/"fix formatting" commit. Only commit once `mise run pr` passes
+and you have staged everything it changed. The toolchain (prettier, markdownlint-cli2, addlicense, actionlint, zizmor)
+is pinned in the root `mise.toml`; `mise install` fetches it.
