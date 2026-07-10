@@ -4,3 +4,6 @@
 # release-please writes both; its release PRs must not trip the format gate
 /CHANGELOG.md
 /.release-please-manifest.json
+
+# shared toolchain submodule (linted in its own repo)
+.mise/

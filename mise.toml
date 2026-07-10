@@ -1,52 +1,14 @@
 # Copyright 2026 BitWise Media Group Ltd
 # SPDX-License-Identifier: MIT
-
-# Dev toolchain and canonical task gates for this repo, on the mise-task layout
-# the reusable CI (.github/workflows/ci.yaml) consumes: it discovers the task
-# list with `mise tasks ls --name-only` and runs only the tasks defined here --
-# lint is the only gate that does real work in a Markdown/YAML library, so
-# build and test are simply not defined and CI skips them.
 #
-# Every tool is version-pinned and resolved through mise's aqua/npm backends;
-# mise.lock records the exact artifact checksums (`lockfile = true`), which CI
-# verifies on install (`--locked`).
-
-[settings]
-lockfile = true
+# github-workflows consumes the shared toolchain (bitwise-media-group/toolchain)
+# as the .mise/ submodule: pinned tools + the markdown-lib task archetype come
+# from there, and the Makefile is a thin forwarder (.mise/mise.mk). zizmor is
+# the one repo-local tool (workflow security lint); repo-local tasks live in
+# tasks.toml (included after the archetype so its lint redefinition wins).
 
 [tools]
-node = "24"
-"npm:prettier" = "3.9.0"
-"npm:markdownlint-cli2" = "0.22.1"
-"aqua:google/addlicense" = "1.2.0"
-"aqua:rhysd/actionlint" = "1.7.12"
 "aqua:zizmorcore/zizmor" = "1.26.1"
 
-# Fix-mode first (inject headers, auto-fix prose), check-mode in `lint`; `pr`
-# chains them in order and ends with the agent-prepared commit handoff, the
-# same shape the old Makefile `pr` gate had.
-[tasks.fmt]
-description = "inject license headers, fix markdown lint, format prose"
-run = [
-  "addlicense -l mit -c 'BitWise Media Group Ltd' -s=only -ignore '.claude/**' -ignore '.bin/**' -ignore 'commit.sh' .",
-  "markdownlint-cli2 --fix",
-  "prettier --write '**/*.md'",
-]
-
-[tasks.lint]
-description = "check-mode static analysis: license headers, prose, workflows"
-run = [
-  "addlicense -l mit -c 'BitWise Media Group Ltd' -s=only -ignore '.claude/**' -ignore '.bin/**' -ignore 'commit.sh' -check .",
-  "markdownlint-cli2",
-  "prettier --check '**/*.md'",
-  "actionlint",
-  "zizmor .github examples",
-]
-
-[tasks.pr]
-description = "full local gate before a pull request"
-run = [
-  "mise run fmt",
-  "mise run lint",
-  "sh -c 'if [ -x ./commit.sh ]; then ./commit.sh; fi'",
-]
+[task_config]
+includes = [".mise/tasks/markdown-lib.toml", "tasks.toml"]

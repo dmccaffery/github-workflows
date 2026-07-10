@@ -17,6 +17,7 @@ globs:
   - "**/*.md"
 
 ignores:
+  - ".mise/**"
   # agent cruft
   - ".claude/**"
   # machine-written by release-please, not house prose
