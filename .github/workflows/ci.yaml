@@ -1,25 +1,29 @@
 # Copyright 2026 BitWise Media Group Ltd
 # SPDX-License-Identifier: MIT
 
-# Reusable CI for any repo. Runs the canonical Makefile gates -- lint, build, test
-# -- as one parallel job per target, then a Codecov upload isolated from
-# PR-supplied code. Language toolchains are set up only when their marker file is
-# present at the repo root: setup-go when go.mod (a Go product) or go.work (the
-# tools-only addlicense module that `make lint` runs) exists, setup-node when
-# package.json exists (Go repos still use node for the doc linters), and setup-uv
-# when pyproject.toml exists -- we standardise on uv for Python, and uv downloads a
-# matching interpreter on demand. The repo's Makefile is the language boundary;
-# this workflow never hard-codes go, npm, or uv.
+# Reusable CI for any repo. Runs the canonical mise tasks -- lint, build, test --
+# as one parallel job per task, then a Codecov upload isolated from PR-supplied
+# code. Language toolchains are set up only when their marker file is present at
+# the repo root: setup-go when go.mod (a Go product) exists, setup-node when
+# package.json exists (Go repos still use node for the doc linters), setup-uv
+# when pyproject.toml exists -- we standardise on uv for Python, and uv downloads
+# a matching interpreter on demand. mise is both the task runner and the source
+# of the pinned dev CLIs the tasks invoke. The repo's mise config is the
+# language boundary; this workflow never hard-codes go, npm, or uv.
 #
-# The consuming repo must provide a Makefile with the canonical targets:
-#   lint  -- all check-mode static analysis (prettier --check, markdownlint, go vet, govulncheck, ...)
+# The consuming repo must provide a mise config -- a root mise.toml, or the
+# shared task library (bitwise-media-group/make) mounted at .mise/ -- defining
+# whichever of the canonical tasks do real work there:
+#   lint  -- all check-mode static analysis (prettier --check, markdownlint, golangci-lint, govulncheck, ...)
 #   build -- compile / build dist/
 #   test  -- tests with coverage, emitting coverage/cobertura-coverage.xml (and optionally coverage/junit.xml)
 #   e2e   -- end-to-end tests (only run when the caller sets e2e: true)
-# Stub any not-applicable target as a no-op (e.g. `build: ; @:`) so `make <target>`
-# always succeeds. Coverage is optional -- a repo that emits none still passes, and
-# a repo that emits no coverage at all (e.g. the skills library) sets `coverage:
-# false` to skip the Codecov upload job entirely.
+# There are no no-op stubs: this workflow discovers the task list
+# (`mise tasks ls --name-only`) and skips absent tasks. A repo with no mise
+# config fails loudly -- there is no Makefile fallback. Coverage is optional -- a
+# repo that emits none still passes, and a repo that emits no coverage at all
+# (e.g. the skills library) sets `coverage: false` to skip the Codecov upload
+# job entirely.
 #
 # Runs via workflow_call from a thin caller (examples/ci.yaml) that owns the
 # push/pull_request triggers.
@@ -44,7 +48,7 @@ on:
         default: go.sum
         type: string
       e2e:
-        description: Run the `make e2e` job. Off by default; e2e often needs services or secrets.
+        description: Run the `e2e` task job. Off by default; e2e often needs services or secrets.
         required: false
         default: false
         type: boolean
@@ -58,9 +62,9 @@ on:
 permissions: {}
 
 jobs:
-  # One parallel job per canonical target. Each detects and sets up only the
-  # toolchains the repo actually has, then runs `make <target>`.
-  make:
+  # One parallel job per canonical task. Each detects and sets up only the
+  # toolchains the repo actually has, then runs `mise run <task>`.
+  tasks:
     name: ${{ matrix.target }}
     strategy:
       fail-fast: false
@@ -75,14 +79,13 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false # read-only checkout; don't leave the token in .git/config
-          submodules: true # fetch the shared Makefile library (bitwise-media-group/make) that repos include at make/; a no-op where no submodule exists
+          submodules: true # fetch the shared task library (bitwise-media-group/make), mounted at .mise/; a no-op where no submodule exists
 
-      # Two mutually-exclusive Go setups (hashFiles is '' when nothing matches; a
-      # bare filename matches the repo root only). A root go.mod marks a repo that
-      # builds Go -- set up from it, cached on go.sum. Otherwise a non-Go repo still
-      # needs a toolchain to `go install` the pinned dev CLIs that `make lint` runs
-      # (addlicense, tflint, ...). That version comes from the make library's
-      # make/.go-version, or a legacy tools-only go.work -- set up from whichever exists.
+      # A root go.mod marks a repo that builds Go -- set up from it, cached on
+      # go.sum. Non-Go repos need no setup-go: the pinned dev CLIs that the
+      # lint task runs (addlicense, tflint, ...) install as prebuilt binaries
+      # via mise below, and the one source-built tool (govulncheck) compiles
+      # with the Go toolchain mise itself provisions from its pins.
       - name: Setup go
         if: hashFiles('go.mod')
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -91,17 +94,8 @@ jobs:
           cache: true
           cache-dependency-path: ${{ inputs.cache-dependency-path }}
 
-      - name: Setup go (tooling)
-        if: ${{ !hashFiles('go.mod') && (hashFiles('go.work') || hashFiles('.go-version') || hashFiles('make/.go-version')) }}
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          # a legacy tools-only go.work, else a .go-version at the repo root (the make
-          # library itself), else the make submodule's make/.go-version (consumers)
-          go-version-file: ${{ hashFiles('go.work') && 'go.work' || (hashFiles('.go-version') && '.go-version' || 'make/.go-version') }}
-          cache: true
-          cache-dependency-path: ${{ hashFiles('go.work') && 'tools/go.sum' || (hashFiles('.go-version') && '.go-version' || 'make/.go-version') }}
-
-      # node is used by Go repos too, for the markdown/prettier doc linters.
+      # node only for repos that build Node (the prose linters -- prettier,
+      # markdownlint-cli2 -- come from mise with its own pinned Node runtime).
       - name: Setup node
         if: hashFiles('package.json')
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -111,7 +105,7 @@ jobs:
 
       # uv is our Python toolchain -- gate on pyproject.toml (every uv project has
       # one). uv reads requires-python / .python-version and downloads a matching
-      # interpreter on demand when the Makefile runs `uv run` / `uv sync`; the cache
+      # interpreter on demand when a task runs `uv run` / `uv sync`; the cache
       # is keyed on the lockfiles. No setup-python: we standardise on uv.
       - name: Setup uv
         if: hashFiles('pyproject.toml')
@@ -119,12 +113,52 @@ jobs:
         with:
           enable-cache: true
 
+      # mise installs the pinned dev CLIs the tasks run, verifying each
+      # download's sha256 (and provenance, where published) against the
+      # library's mise.lock (`--locked` is added automatically). The whole
+      # toolset is installed eagerly and cached keyed on the config hash, so
+      # after the first run per pin-set this restores from cache. Gated on a
+      # config existing at the repo root (a root mise.toml, or the library
+      # mounted at .mise/ -- both resolve from the workspace root); a repo with
+      # neither fails the task-detection step below with a clear error.
+      - name: Setup mise
+        if: ${{ hashFiles('mise.toml') || hashFiles('.mise/config.toml') }}
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.7.3
+          # sha256 of mise-v2026.7.3-linux-x64.tar.gz, from the release's SHASUMS256.txt
+          sha256: 4cd83913f590ae3c7e06b1f49dc19ad521c284b6d82652782e1444b63f260c25
+
+      # A repo defines only the canonical tasks that do real work -- there are
+      # no no-op stubs -- so ask mise for the task list and skip the tasks this
+      # repo does not define. A mise failure fails this step rather than
+      # silently skipping the task.
+      - name: Detect the ${{ matrix.target }} task
+        id: task
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ ! -f mise.toml ] && [ ! -f .mise/config.toml ]; then
+            echo "::error::no mise config found (mise.toml or .mise/config.toml) -- this workflow requires the mise-task layout"
+            exit 1
+          fi
+          tasks="$(mise tasks ls --name-only)"
+          if printf '%s\n' "$tasks" | grep -qxF -- "$TARGET"; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "run=false" >>"$GITHUB_OUTPUT"
+            echo "no '$TARGET' task defined -- skipping"
+          fi
+
       - name: Run ${{ matrix.target }}
-        run: make ${{ matrix.target }}
+        if: steps.task.outputs.run == 'true'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: mise run "$TARGET"
 
       # Repos that commit their build output -- a JavaScript Action shipping a
       # checked-in dist/, which GitHub runs directly with no build at consumption
-      # time -- must keep that artifact in sync with source. After `make build`
+      # time -- must keep that artifact in sync with source. After the build task
       # regenerates dist/, a non-empty diff means the committed copy is stale; fail
       # the PR so it never reaches main (and never gets released). Gated on dist/
       # existing, so it is a no-op for the repos that don't commit one.
@@ -136,12 +170,16 @@ jobs:
       # emit none, e.g. the skills library), and even when on, `if-no-files-found:
       # ignore` keeps a repo that happens to produce nothing from erroring -- the
       # isolated coverage job below skips the upload when nothing was produced.
+      # Go repos emit the native profile (coverage.out, which Codecov ingests
+      # directly); everything else emits Cobertura XML -- always one or the other.
       - name: Upload coverage artifact
         if: ${{ matrix.target == 'test' && inputs.coverage }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
-          path: coverage/cobertura-coverage.xml
+          path: |
+            coverage/coverage.out
+            coverage/cobertura-coverage.xml
           if-no-files-found: ignore
 
       - name: Upload test results artifact
@@ -156,8 +194,8 @@ jobs:
   # Codecov token isolated from PR-supplied code. Tolerant of repos that emit no
   # coverage: the downloads may find nothing and each upload is gated on the file.
   coverage:
-    needs: make
-    if: ${{ !cancelled() && needs.make.result == 'success' && inputs.coverage }}
+    needs: tasks
+    if: ${{ !cancelled() && needs.tasks.result == 'success' && inputs.coverage }}
     runs-on: ubuntu-latest
     permissions:
       # check out the repository
@@ -174,11 +212,13 @@ jobs:
           name: coverage-report
         continue-on-error: true
 
+      # The artifact holds the native Go profile or Cobertura XML, never both --
+      # upload whichever the test job produced.
       - name: Upload coverage report
-        if: hashFiles('cobertura-coverage.xml')
+        if: ${{ hashFiles('coverage.out', 'cobertura-coverage.xml') != '' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
-          files: cobertura-coverage.xml
+          files: ${{ hashFiles('coverage.out') && 'coverage.out' || 'cobertura-coverage.xml' }}
           disable_search: true
           fail_ci_if_error: true
 
@@ -210,7 +250,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false # read-only checkout; don't leave the token in .git/config
-          submodules: true # fetch the shared Makefile library (bitwise-media-group/make) that repos include at make/; a no-op where no submodule exists
+          submodules: true # fetch the shared task library (bitwise-media-group/make), mounted at .mise/; a no-op where no submodule exists
 
       - name: Setup go
         if: hashFiles('go.mod')
@@ -233,5 +273,16 @@ jobs:
         with:
           enable-cache: true
 
+      # See the tasks job's Setup mise step: pinned dev CLIs install via mise.
+      - name: Setup mise
+        if: ${{ hashFiles('mise.toml') || hashFiles('.mise/config.toml') }}
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.7.3
+          # sha256 of mise-v2026.7.3-linux-x64.tar.gz, from the release's SHASUMS256.txt
+          sha256: 4cd83913f590ae3c7e06b1f49dc19ad521c284b6d82652782e1444b63f260c25
+
+      # No task-existence gate here: e2e is opt-in (`e2e: true` in the caller),
+      # so a repo that opts in without defining the task should fail loudly.
       - name: Run e2e
-        run: make e2e
+        run: mise run e2e

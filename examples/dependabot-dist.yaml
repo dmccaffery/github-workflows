@@ -8,7 +8,7 @@
 # waits for green, so the PR would stick.
 #
 # How it works: when your CI FAILS on a `dependabot/` branch, the reusable workflow checks
-# out the PR head, runs `make build`, and — only if dist/ changed — commits the rebuilt
+# out the PR head, runs `mise run build`, and — only if dist/ changed — commits the rebuilt
 # bundle back to the PR branch as the "FF Merge" App. That push re-triggers CI, which now
 # reproduces dist/ and goes green. It does NOT approve or merge: the rebuild commit makes
 # the head a non-Dependabot commit, so a human approves the (production-dependency) bump

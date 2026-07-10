@@ -254,7 +254,7 @@ jobs:
           ref: ${{ needs.release-please.outputs.tag_name }}
           fetch-depth: 0 # GoReleaser needs full history + tags for the changelog
           persist-credentials: false # GoReleaser publishes via the GITHUB_TOKEN env, not the persisted credential
-          submodules: true # fetch the shared Makefile library (bitwise-media-group/make) whose .syft-version pin the SBOM step below installs from; a no-op where no submodule exists
+          submodules: true # fetch the shared task library (bitwise-media-group/make), mounted at .mise/, whose mise pins the SBOM step below installs syft from; a no-op where no submodule exists
 
       - name: Setup go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -268,16 +268,30 @@ jobs:
       - name: Setup cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      # GoReleaser's sboms config shells out to `syft`. Install it by the immutable
-      # commit SHA pinned in the make library's .syft-version ("<version> <sha>") --
-      # the same pin the local snapshot/release targets install from -- and put it
-      # on PATH. Skipped where the make/ submodule is absent: a repo not yet on the
+      # GoReleaser's sboms config shells out to `syft`. Install just syft from the
+      # shared library's mise pins -- sha256 checksum and provenance verified
+      # against its mise.lock (`--locked` is added automatically), the same pins
+      # the local snapshot/release tasks use -- and put it on PATH. The config
+      # lives at the repo root (mise.toml, or the library mounted at
+      # .mise/config.toml). Skipped where neither exists: a repo not yet on the
       # library still invokes syft from its own tools/go.mod via its sboms config.
+      - name: Setup mise
+        if: ${{ hashFiles('mise.toml') || hashFiles('.mise/config.toml') }}
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.7.3
+          # sha256 of mise-v2026.7.3-linux-x64.tar.gz, from the release's SHASUMS256.txt
+          sha256: 4cd83913f590ae3c7e06b1f49dc19ad521c284b6d82652782e1444b63f260c25
+          install_args: aqua:anchore/syft
+          # no cache in the release-signing job: a cache poisoned from a
+          # less-trusted context must not feed the signed, attested artifacts
+          cache: false
+
       - name: Setup syft
-        if: hashFiles('make/.syft-version')
+        if: ${{ hashFiles('mise.toml') || hashFiles('.mise/config.toml') }}
         run: |
-          sha="$(cut -d' ' -f2 make/.syft-version)"
-          GOBIN="$GITHUB_WORKSPACE/.bin" go install "github.com/anchore/syft/cmd/syft@${sha}"
+          mkdir -p "$GITHUB_WORKSPACE/.bin"
+          ln -sf "$(mise which syft)" "$GITHUB_WORKSPACE/.bin/syft"
           echo "$GITHUB_WORKSPACE/.bin" >> "$GITHUB_PATH"
 
       - name: Create release (goreleaser)

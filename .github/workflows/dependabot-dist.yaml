@@ -4,13 +4,13 @@
 # Reusable Dependabot dist/ rebuild. A JavaScript/TypeScript Action ships its bundled
 # output committed at dist/, which GitHub runs directly at consumption time with no build
 # step -- so the reusable CI (ci.yaml) fails any PR whose committed dist/ does not
-# reproduce from src/ (`make build` then `git diff --exit-code -- dist`). Dependabot bumps
-# a bundled dependency but never runs `make build`, so its PR lands with a stale dist/ and
-# CI goes red -- and Dependabot auto-merge (dependabot-merge.yaml) waits for green, so the
-# PR sticks.
+# reproduce from src/ (`mise run build` then `git diff --exit-code -- dist`). Dependabot
+# bumps a bundled dependency but never runs the build task, so its PR lands with a stale
+# dist/ and CI goes red -- and Dependabot auto-merge (dependabot-merge.yaml) waits for
+# green, so the PR sticks.
 #
 # This workflow closes that gap. When a watched CI run for a `dependabot/` branch FAILS, it
-# checks out the PR head, runs `make build`, and -- only if dist/ actually changed --
+# checks out the PR head, runs `mise run build`, and -- only if dist/ actually changed --
 # commits the regenerated bundle back to the PR branch as the App. That push re-triggers CI
 # (an App-token push does; a GITHUB_TOKEN push would be suppressed by GitHub's own
 # loop-prevention), and the rerun's dist/ now reproduces, so CI goes green.
@@ -98,7 +98,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
-          # fetch the shared Makefile library (bitwise-media-group/make) included at make/
+          # fetch the shared task library (bitwise-media-group/make), mounted at .mise/
           submodules: true
           # Fetch with the App token but do NOT persist it: the build below runs the PR's
           # dependency tree, which must never see the write token. The push step re-supplies
@@ -115,8 +115,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # mise is the task runner: the rebuild below is `mise run build`, with the
+      # bundler tools pinned and verified against the library's mise.lock.
+      - name: Setup mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.7.3
+          # sha256 of mise-v2026.7.3-linux-x64.tar.gz, from the release's SHASUMS256.txt
+          sha256: 4cd83913f590ae3c7e06b1f49dc19ad521c284b6d82652782e1444b63f260c25
+
       - name: Rebuild the bundle
-        run: make build
+        run: mise run build
 
       - name: Commit and push the rebuilt bundle if it changed
         env:

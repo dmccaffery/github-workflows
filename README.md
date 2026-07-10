@@ -15,7 +15,7 @@ action is pinned to a full commit SHA; Dependabot keeps the pins fresh.
 
 | Workflow                                         | Platform | What it does                                                                                                              |
 | ------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| [`ci.yaml`](#ciyaml)                             | any      | canonical Makefile gates (lint/build/test) per job, committed `dist/` verified, toolchains by detection, Codecov upload   |
+| [`ci.yaml`](#ciyaml)                             | any      | canonical mise tasks (lint/build/test) per job, committed `dist/` verified, toolchains by detection, Codecov upload       |
 | [`security.yaml`](#securityyaml)                 | any      | CodeQL over actions + go (autobuild) + javascript-typescript, language matrix by detection                                |
 | [`release.yaml`](#releaseyaml)                   | any      | release-please (two-pass) → GoReleaser (if `.goreleaser.yaml`) + Zensical docs to Pages (if `zensical.toml`); vanity tags |
 | [`merge.yaml`](#mergeyaml)                       | any      | signature-preserving fast-forward merge — `/merge` now, or `/auto-merge` (comment/label) when approved + green            |
@@ -31,11 +31,12 @@ link beneath it for the fully-commented version.
 
 ### `ci.yaml`
 
-_Any repo._ Runs the canonical Makefile gates — `lint`, `build`, `test` — as one parallel job each, sets up only the
+_Any repo._ Runs the canonical mise tasks — `lint`, `build`, `test` — as one parallel job each, sets up only the
 toolchains the repo has (a root `go.mod` → Go, `package.json` → Node), and uploads coverage to Codecov from a job
-isolated from PR-built code. A repo that commits its build output has its `dist/` verified up to date after `make build`
-(so a stale committed artifact fails the PR). An opt-in `e2e` job runs `make e2e`. A caller may add product-specific
-jobs (e.g. `integration`) alongside the `ci` job.
+isolated from PR-built code. Tasks the repo does not define are skipped; a repo with no mise config at all fails. A repo
+that commits its build output has its `dist/` verified up to date after `mise run build` (so a stale committed artifact
+fails the PR). An opt-in `e2e` job runs `mise run e2e`. A caller may add product-specific jobs (e.g. `integration`)
+alongside the `ci` job.
 
 - **Inputs:** `go-version-file` (default `go.mod`), `node-version-file` (default `.node-version`),
   `cache-dependency-path` (default `go.sum`; newline-separated lockfiles to key the module cache on), `e2e` (default
@@ -297,16 +298,17 @@ Full example: [`examples/dependabot-merge.yaml`](examples/dependabot-merge.yaml)
 
 _Node Actions that commit `dist/`._ Closes the gap between a committed build artifact and Dependabot. A
 JavaScript/TypeScript Action ships its bundled `dist/`, and `ci.yaml` fails any PR whose committed `dist/` does not
-reproduce from `src/`. Dependabot bumps a bundled dependency but never runs `make build`, so its PR lands with a stale
+reproduce from `src/`. Dependabot bumps a bundled dependency but never runs the build task, so its PR lands with a stale
 `dist/` and CI goes red — and `dependabot-merge.yaml` waits for green, so the PR sticks. When a watched CI run for a
-`dependabot/` branch **fails**, this checks out the PR head, runs `make build`, and — only if `dist/` actually changed —
-commits the rebuilt bundle back to the PR branch as the "FF Merge" App. That push re-triggers CI (an App-token push
-does; a `GITHUB_TOKEN` push would be suppressed by loop-prevention), so the rerun reproduces `dist/` and goes green. It
-does **not** approve or merge: the rebuild commit makes the head a non-Dependabot commit, so `dependabot-merge.yaml` no
-longer auto-approves — a human approves the (production-dependency) bump and the existing App squash-merge finishes it.
-Dev-only bumps that don't touch `dist/` never fail CI, never reach this workflow, and keep auto-merging. Rebuilding runs
-the PR's dependency tree, so the write-capable App token is kept out of the build: it is minted first but the checkout
-persists no credentials, and the token appears only in the final push step, after the build has run.
+`dependabot/` branch **fails**, this checks out the PR head, runs `mise run build`, and — only if `dist/` actually
+changed — commits the rebuilt bundle back to the PR branch as the "FF Merge" App. That push re-triggers CI (an App-token
+push does; a `GITHUB_TOKEN` push would be suppressed by loop-prevention), so the rerun reproduces `dist/` and goes
+green. It does **not** approve or merge: the rebuild commit makes the head a non-Dependabot commit, so
+`dependabot-merge.yaml` no longer auto-approves — a human approves the (production-dependency) bump and the existing App
+squash-merge finishes it. Dev-only bumps that don't touch `dist/` never fail CI, never reach this workflow, and keep
+auto-merging. Rebuilding runs the PR's dependency tree, so the write-capable App token is kept out of the build: it is
+minted first but the checkout persists no credentials, and the token appears only in the final push step, after the
+build has run.
 
 - **Inputs:** `app-client-id` (required; `vars.FF_MERGE_CLIENT_ID`), `node-version-file` (optional, default
   `.node-version`), `paths` (optional; space-separated build-output path(s) to rebuild and commit, default `dist`).
@@ -373,15 +375,18 @@ Full example: [`examples/add-to-project.yaml`](examples/add-to-project.yaml).
 
 ## Consumer contracts
 
-The reusable workflows stay free of per-repo configuration by assuming a small contract. The **Makefile is the language
-boundary** — every repo provides the same canonical targets and the workflows just run `make <target>`, setting up
-toolchains from the files at the repo root:
+The reusable workflows stay free of per-repo configuration by assuming a small contract. The **mise config is the
+language boundary** — every repo provides the same canonical tasks and the workflows just run `mise run <task>`, setting
+up toolchains from the files at the repo root:
 
-- **Makefile targets** — `lint` (all check-mode static analysis: `prettier --check`, markdownlint, and for Go `go vet` /
-  `govulncheck`), `build`, `test` (emitting `coverage/cobertura-coverage.xml`, optionally `coverage/junit.xml`), and
-  `e2e`. Stub any that don't apply as a no-op (`build: ; @:`) so `make <target>` always succeeds; coverage is optional.
+- **mise tasks** — defined in a root `mise.toml`, or by the shared task library
+  ([`bitwise-media-group/make`](https://github.com/bitwise-media-group/make)) mounted as a submodule at `.mise/`: `lint`
+  (all check-mode static analysis: `prettier --check`, markdownlint, and for Go `go vet` / `govulncheck`), `build`,
+  `test` (emitting `coverage/cobertura-coverage.xml`, optionally `coverage/junit.xml`), and `e2e`. Define only the tasks
+  that do real work — CI discovers the task list and skips the rest; coverage is optional. A repo with no mise config
+  fails CI.
 - **Toolchain detection** — `setup-go` runs only when a **root `go.mod`** exists; `setup-node` only when `package.json`
-  exists (the `make` targets install their own deps, so the workflow sets up the toolchain but does not run `npm ci`). A
+  exists (the tasks install their own deps, so the workflow sets up the toolchain but does not run `npm ci`). A
   tools-only `go.work` + `tools/go.mod` (for `go tool addlicense`) is universal dev tooling, so it is **not** a
   Go-product signal — only a root `go.mod` is.
 - **CodeQL** — scans `actions` always, `go` (autobuild, `setup-go` from `go-version-file`) when a root `go.mod` exists,
@@ -418,15 +423,15 @@ reminder. The one-time org setup (the "FF Merge" GitHub App, its ruleset bypass,
 
 ## Testing changes
 
-This repo dogfoods its own reusable workflows by local path: `self-ci.yaml` calls `ci.yaml` (which detects node only —
-there is no root `go.mod` — and runs the canonical `make` gates) and `self-release.yaml` calls `release.yaml` (no
-`.goreleaser.yaml`, so just the release-please cut plus the `vanity-tags` job). `self-security.yaml` stays a bespoke
-`actions`-only scan: the library has no compilable Go and no JS/TS product source, so the reusable `security.yaml` would
-add an empty `javascript-typescript` leg from its tooling-only `package.json`. The `/merge` + auto-merge flows
-(`self-merge.yaml`), its fork-PR review-ack companion (`self-merge-review-ack.yaml`), the merge notice
-(`self-merge-notice.yaml`), and Dependabot auto-merge (`self-dependabot-merge.yaml`, which keeps the reusable workflows'
-action pins fresh) dogfood the rest. Validate a change to a reusable workflow by temporarily pointing a real consumer's
-caller at a feature branch or SHA (`@your-branch`) and opening a PR there.
+This repo dogfoods its own reusable workflows by local path: `self-ci.yaml` calls `ci.yaml` (which installs the pinned
+toolchain from the root `mise.toml` and runs the one task this repo defines, `lint`) and `self-release.yaml` calls
+`release.yaml` (no `.goreleaser.yaml`, so just the release-please cut plus the `vanity-tags` job). `self-security.yaml`
+stays a bespoke `actions`-only scan: the library has no compilable Go and no JS/TS product source, so an `actions`
+CodeQL pass is the whole surface. The `/merge` + auto-merge flows (`self-merge.yaml`), its fork-PR review-ack companion
+(`self-merge-review-ack.yaml`), the merge notice (`self-merge-notice.yaml`), and Dependabot auto-merge
+(`self-dependabot-merge.yaml`, which keeps the reusable workflows' action pins fresh) dogfood the rest. Validate a
+change to a reusable workflow by temporarily pointing a real consumer's caller at a feature branch or SHA
+(`@your-branch`) and opening a PR there.
 
 ## Releasing this repo
 
