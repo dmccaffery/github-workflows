@@ -40,6 +40,8 @@ permissions:
   attestations: write
   # artifact storage record for the attestation
   artifact-metadata: write
+  # push container images to ghcr (goreleaser dockers_v2, when configured)
+  packages: write
   # publish the docs site to GitHub Pages (docs job, when a zensical.toml exists)
   pages: write
 

@@ -119,8 +119,8 @@ on:
 
 # Granted per job below. Note for callers: GitHub validates a reusable workflow's
 # permissions as the union of every job and ignores `if:`, so a caller must grant
-# the goreleaser job's id-token/attestations/artifact-metadata and the docs job's
-# pages:write even on the paths where those jobs are skipped -- see
+# the goreleaser job's id-token/attestations/artifact-metadata/packages and the
+# docs job's pages:write even on the paths where those jobs are skipped -- see
 # examples/release.yaml.
 permissions: {}
 
@@ -248,6 +248,8 @@ jobs:
       attestations: write
       # create artifact storage record for github attestation
       artifact-metadata: write
+      # push container images (a repo with a dockers_v2 config) to ghcr
+      packages: write
     steps:
       - name: Checkout repository at release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -298,6 +300,28 @@ jobs:
           ln -sf "$(mise which syft)" "$RUNNER_TEMP/bin/syft"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
+      # Container images (a repo with a dockers_v2 config in .goreleaser.yaml):
+      # buildx with a docker-container driver for multi-platform manifests, QEMU
+      # binfmt so non-native Dockerfile stages (apt/npm under arm64) can run on
+      # the amd64 runner, and a ghcr login for the push. Gated on a repo-root
+      # Dockerfile / Dockerfile.* — the same convention dockers_v2 configs here
+      # follow — so image-less repos skip all three.
+      - name: Setup QEMU
+        if: ${{ hashFiles('Dockerfile', 'Dockerfile.*') != '' }}
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Setup docker buildx
+        if: ${{ hashFiles('Dockerfile', 'Dockerfile.*') != '' }}
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Login to ghcr
+        if: ${{ hashFiles('Dockerfile', 'Dockerfile.*') != '' }}
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create release (goreleaser)
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -318,12 +342,11 @@ jobs:
         with:
           subject-checksums: ./dist/checksums.txt
 
-      # Attest build provenance for the published container images. GoReleaser's
-      # docker_digest config writes dist/digests.txt in the same sha256sum format
-      # (`<digest>  <image:tag>`), so each image manifest becomes a subject. Only
-      # repos that configure docker_digest produce the file; skipped otherwise.
-      # Verify with:
-      #   gh attestation verify --owner <org> oci://<image>:<tag>
+      # Attest SLSA build provenance for every container image goreleaser
+      # published: dist/digests.txt (the docker_digest artifact) lists
+      # `<hex digest>  <image:tag>` in the same checksum format. Skipped on a
+      # repo that builds no images. Verify with:
+      #   gh attestation verify --owner <org> oci://ghcr.io/<org>/<image>:<tag>
       - name: Attest container images
         if: ${{ hashFiles('dist/digests.txt') != '' }}
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
