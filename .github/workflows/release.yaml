@@ -289,12 +289,14 @@ jobs:
           # less-trusted context must not feed the signed, attested artifacts
           cache: false
 
+      # The shim lives in $RUNNER_TEMP, never the workspace: an untracked
+      # directory in the checkout fails GoReleaser's git-dirty check.
       - name: Setup syft
         if: ${{ hashFiles('mise.toml') || hashFiles('.mise/config.toml') }}
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/.bin"
-          ln -sf "$(mise which syft)" "$GITHUB_WORKSPACE/.bin/syft"
-          echo "$GITHUB_WORKSPACE/.bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/bin"
+          ln -sf "$(mise which syft)" "$RUNNER_TEMP/bin/syft"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
       - name: Create release (goreleaser)
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
