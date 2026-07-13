@@ -7,8 +7,9 @@
 #
 #   - A repo with a .goreleaser.yaml takes the `goreleaser` job: GoReleaser builds
 #     archives + checksums + SBOMs + keyless cosign signatures, an optional
-#     Homebrew cask, and a GitHub build-provenance attestation over checksums.txt,
-#     then adopts and publishes the draft release.
+#     Homebrew cask, and a GitHub build-provenance attestation over checksums.txt
+#     (plus digests.txt when the repo publishes container images via
+#     docker_digest), then adopts and publishes the draft release.
 #   - A repo with a zensical.toml takes the `docs` job: it rebuilds the Zensical
 #     site (uv run zensical build) and publishes it to GitHub Pages. This is keyed
 #     off the same config-presence detection as the goreleaser path and is
@@ -314,6 +315,18 @@ jobs:
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
           subject-checksums: ./dist/checksums.txt
+
+      # Attest build provenance for the published container images. GoReleaser's
+      # docker_digest config writes dist/digests.txt in the same sha256sum format
+      # (`<digest>  <image:tag>`), so each image manifest becomes a subject. Only
+      # repos that configure docker_digest produce the file; skipped otherwise.
+      # Verify with:
+      #   gh attestation verify --owner <org> oci://<image>:<tag>
+      - name: Attest container images
+        if: ${{ hashFiles('dist/digests.txt') != '' }}
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-checksums: ./dist/digests.txt
 
   # Build the Zensical documentation site and publish it to GitHub Pages -- the
   # zensical.toml counterpart to the goreleaser path. It only needs release-please
