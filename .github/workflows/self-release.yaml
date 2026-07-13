@@ -19,7 +19,7 @@ on:
 # GitHub resolves a reusable workflow's permissions statically at startup: it takes
 # the union of every job's declared permissions and ignores `if:`. So the caller
 # must grant what the goreleaser job declares (id-token / attestations /
-# artifact-metadata) and what the docs job declares (pages) even though both are
+# artifact-metadata / packages) and what the docs job declares (pages) even though both are
 # skipped here (no .goreleaser.yaml, no zensical.toml) -- dropping them
 # startup_failures the whole run. No executed job realizes them at runtime:
 # release-please and publish declare their own narrower job-level permissions, and
@@ -37,6 +37,8 @@ permissions:
   attestations: write
   # artifact storage record for the attestation
   artifact-metadata: write
+  # push container images to ghcr (goreleaser dockers_v2, gated on a Dockerfile)
+  packages: write
   # publish the docs site to GitHub Pages (docs job, gated on a zensical.toml)
   pages: write
 
