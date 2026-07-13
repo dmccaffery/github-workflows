@@ -1,5 +1,23 @@
 # Changelog
 
+## [6.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v5.0.0...v6.0.0) (2026-07-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **release:** the goreleaser job now requests packages: write, and a reusable workflow may not request more than its caller grants — every caller of release.yaml must add packages: write to its permissions block (see examples/release.yaml), even when it builds no images.
+
+### Features
+
+* **release:** attest docker image digests if they exist ([eb99eed](https://github.com/bitwise-media-group/github-workflows/commit/eb99eed59d6c6fd91e7c198f1edc03cb42569a40))
+* **release:** build and attest container images via goreleaser dockers_v2 ([b462b79](https://github.com/bitwise-media-group/github-workflows/commit/b462b798ce1c48a8d56d115b060a9aa291f89ae0))
+
+
+### Bug Fixes
+
+* **deps:** Bump astral-sh/setup-uv from 8.2.0 to 8.3.0 ([#65](https://github.com/bitwise-media-group/github-workflows/issues/65)) ([550e39e](https://github.com/bitwise-media-group/github-workflows/commit/550e39e4ada0bd40b55497ca0e90e7d005ae935e))
+* **release:** put the syft shim in RUNNER_TEMP, not the workspace ([df2163f](https://github.com/bitwise-media-group/github-workflows/commit/df2163f543c66411334c07ec5726ce8e451150c7))
+
 ## [5.0.0](https://github.com/bitwise-media-group/github-workflows/compare/v4.4.0...v5.0.0) (2026-07-10)
 
 
