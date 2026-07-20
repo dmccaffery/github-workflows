@@ -345,10 +345,14 @@ jobs:
       # Attest SLSA build provenance for every container image goreleaser
       # published: dist/digests.txt (the docker_digest artifact) lists
       # `<hex digest>  <image:tag>` in the same checksum format. Skipped on a
-      # repo that builds no images. Verify with:
+      # repo that builds no images -- gated on a repo-root Dockerfile like the
+      # container setup steps above, because goreleaser writes an *empty*
+      # digests.txt even when no images were built, which an existence check
+      # alone (hashFiles hashes empty files too) would wave through into an
+      # attest failure ("no statement subjects"). Verify with:
       #   gh attestation verify --owner <org> oci://ghcr.io/<org>/<image>:<tag>
       - name: Attest container images
-        if: ${{ hashFiles('dist/digests.txt') != '' }}
+        if: ${{ hashFiles('Dockerfile', 'Dockerfile.*') != '' && hashFiles('dist/digests.txt') != '' }}
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
           subject-checksums: ./dist/digests.txt
